@@ -1,0 +1,34 @@
+# Контекст сборки: чем он меньше, тем быстрее сборка (лимит 5 минут)
+
+.git
+.gitignore
+.dockerignore
+
+# Секреты в образ не попадают
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Зависимости и сборки — ставятся и собираются внутри образа
+node_modules
+webapp/dist
+webapp/.vite
+backend/bin
+*.exe
+*.test
+
+# Документация и презентации
+docs
+README.md
+*.md
+!backend/templates/*.md
+
+# Редакторы, ОС, логи
+.vscode
+.idea
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store

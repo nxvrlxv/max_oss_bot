@@ -1,0 +1,18 @@
+# Действует, если в compose.yaml контекст сборки — ./webapp
+
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+.vite
+
+*.log
+npm-debug.log*
+
+.vscode
+.idea
+Thumbs.db
+Desktop.ini
+.DS_Store

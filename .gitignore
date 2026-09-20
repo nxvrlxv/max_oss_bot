@@ -1,0 +1,41 @@
+# Секреты — в репозиторий не попадают никогда
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Сборки Go
+/backend/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Зависимости и сборка фронтенда
+node_modules/
+/webapp/dist/
+/webapp/.vite/
+*.local
+
+# Логи
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Сгенерированные документы и загруженные реестры
+/backend/generated/
+/backend/uploads/
+/data/
+
+# Редакторы и ОС
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store

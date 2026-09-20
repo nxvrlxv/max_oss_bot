@@ -1,0 +1,22 @@
+# Действует, если в compose.yaml контекст сборки — ./backend
+
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+bin
+*.exe
+*.test
+*.out
+*.log
+
+# Тесты в образе не нужны, но testdata нужна: на ней идёт демо
+*_test.go
+
+.vscode
+.idea
+Thumbs.db
+Desktop.ini
+.DS_Store
