@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	api, err := maxbot.New(os.Getenv("TOKEN"), maxbot.WithBaseURL("https://platform-api.max.ru/"))
+	api, err := maxbot.New(os.Getenv("TOKEN"), maxbot.WithBaseURL("https://platform-api2.max.ru/"))
 
 	if err != nil {
 		return
