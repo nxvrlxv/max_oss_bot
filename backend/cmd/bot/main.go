@@ -2,40 +2,65 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"log"
 	"os"
 	"os/signal"
+	"syscall"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
-	"github.com/max-messenger/max-bot-api-client-go/schemes"
+
+	"oss-max/internal/bot"
+	"oss-max/internal/config"
+	"oss-max/internal/storage"
 )
 
 func main() {
-	api, err := maxbot.New(os.Getenv("TOKEN"), maxbot.WithBaseURL("https://platform-api.max.ru/"))
-
+	cfg, err := config.Load()
 	if err != nil {
-		return
+		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background()) // создам
-	// Some methods demo:
-	info, err := api.Bots.GetBot(ctx)
-	fmt.Printf("Get me: %#v %#v", info, err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	api, err := maxbot.New(cfg.BotToken, maxbot.WithBaseURL(cfg.APIBase))
+	if err != nil {
+		log.Fatalf("клиент MAX: %v", err)
+	}
+
+	// Ошибки поллинга библиотека складывает в канал; без читателя они теряются.
 	go func() {
-		exit := make(chan os.Signal)
-		signal.Notify(exit, os.Kill, os.Interrupt)
-		<-exit
-		cancel()
+		for err := range api.GetErrors() {
+			log.Printf("MAX API: %v", err)
+		}
 	}()
 
-	for upd := range api.GetUpdates(ctx) { // Чтение из канала с обновлениями
-		switch upd := upd.(type) { // Определение типа пришедшего обновления
-		case *schemes.MessageCreatedUpdate:
-			// Отправка сообщения
-			err := api.Messages.Send(ctx, maxbot.NewMessage().SetChat(upd.Message.Recipient.ChatId).SetText("Hello from Bot"))
-			if err != nil {
-				return
-			}
+	info, err := api.Bots.GetBot(ctx)
+	if err != nil {
+		log.Fatalf("проверка токена: %v", err)
+	}
+	log.Printf("бот @%s (%d)", info.Username, info.UserId)
+
+	var store bot.Store
+	if cfg.DatabaseURL == "" {
+		log.Print("DATABASE_URL не задан — данные в памяти, собраний не будет")
+		store = bot.NewMemoryStore()
+	} else {
+		db, err := storage.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			log.Fatal(err)
 		}
+		defer db.Close()
+		store = db
+	}
+
+	b := bot.New(api, cfg, store, info.Username)
+	if err := b.SetCommands(ctx); err != nil {
+		log.Printf("список команд: %v", err)
+	}
+
+	if err := b.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Fatal(err)
 	}
 }

@@ -16,10 +16,13 @@ type Bot struct {
 	api   *maxbot.Api
 	cfg   config.Config
 	store Store
+	app   string // username бота: кнопка open_app открывает мини-приложение этого бота
 }
 
-func New(api *maxbot.Api, cfg config.Config, store Store) *Bot {
-	return &Bot{api: api, cfg: cfg, store: store}
+// New — app это username бота из GetBot. В кнопку open_app MAX принимает
+// не адрес мини-приложения, а бота, к которому оно подключено на платформе.
+func New(api *maxbot.Api, cfg config.Config, store Store, app string) *Bot {
+	return &Bot{api: api, cfg: cfg, store: store, app: app}
 }
 
 // Run получает события и передаёт их роутеру. Транспорт выбирается

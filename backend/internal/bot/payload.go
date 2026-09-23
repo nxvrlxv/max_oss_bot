@@ -23,12 +23,14 @@ type Payload struct {
 	ID     int
 }
 
-// Format собирает строку для кнопки: "open:42" или "new".
+// Format собирает строку для кнопки: "open_42" или "new".
+// Разделитель — подчёркивание: payload кнопки мини-приложения MAX
+// принимает только буквы, цифры, «_» и «-», двоеточие отклоняет.
 func Format(action Action, id int) string {
 	if id == 0 {
 		return string(action)
 	}
-	return string(action) + ":" + strconv.Itoa(id)
+	return string(action) + "_" + strconv.Itoa(id)
 }
 
 // Parse разбирает нагрузку. Второе значение — false, если строка пустая
@@ -39,7 +41,8 @@ func Parse(raw string) (Payload, bool) {
 		return Payload{}, false
 	}
 
-	action, rest, found := strings.Cut(raw, ":")
+	// Двоеточие — старый формат, в уже отправленных кнопках он остался.
+	action, rest, found := strings.Cut(strings.Replace(raw, ":", "_", 1), "_")
 	payload := Payload{Action: Action(action)}
 
 	if found {

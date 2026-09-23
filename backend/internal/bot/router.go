@@ -2,11 +2,15 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
 	"github.com/max-messenger/max-bot-api-client-go/schemes"
+
+	"oss-max/internal/storage"
 )
 
 // Handle разбирает событие по типу и зовёт нужный обработчик.
@@ -53,15 +57,15 @@ func (b *Bot) onBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) e
 	}
 
 	meeting, err := b.store.Meeting(ctx, payload.ID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return b.sendMainMenu(ctx, upd.ChatId)
+	}
 	if err != nil {
 		return fmt.Errorf("собрание %d: %w", payload.ID, err)
 	}
-	if meeting.ID == 0 {
-		return b.sendMainMenu(ctx, upd.ChatId)
-	}
 
 	kb := b.api.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddOpenApp("Проголосовать", b.cfg.WebAppURL, Format(ActionOpen, meeting.ID), 0)
+	kb.AddRow().AddOpenApp("Проголосовать", b.app, Format(ActionOpen, meeting.ID), 0)
 
 	text := fmt.Sprintf("Голосование по вопросу:\n\n%s", meeting.Question)
 
@@ -71,7 +75,7 @@ func (b *Bot) onBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) e
 // sendMainMenu — меню инициатора: с него начинается сценарий создания собрания.
 func (b *Bot) sendMainMenu(ctx context.Context, chatID int64) error {
 	kb := b.api.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddOpenApp("Создать собрание", b.cfg.WebAppURL, Format(ActionNew, 0), 0)
+	kb.AddRow().AddOpenApp("Создать собрание", b.app, Format(ActionNew, 0), 0)
 	kb.AddRow().AddCallback("Мои собрания", schemes.DEFAULT, Format(ActionList, 0))
 
 	text := "Помогу подготовить общее собрание собственников:\n" +
@@ -97,16 +101,22 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 		return nil
 	}
 
-	switch content {
+	// В групповом чате команда может прийти как «/status@имя_бота» или с аргументами.
+	command, _, _ := strings.Cut(content, " ")
+	command, _, _ = strings.Cut(command, "@")
+
+	// По логу инициатор узнаёт свой max_id — он нужен для seed.
+	log.Printf("%s от пользователя %d в чате %d", command, upd.Message.Sender.UserId, upd.GetChatID())
+
+	switch command {
 	case "/start":
 		return b.sendMainMenu(ctx, upd.GetChatID())
 	case "/init_sobr":
 		kb := b.api.Messages.NewKeyboardBuilder()
-		kb.AddRow().AddOpenApp("Запустить приложение", b.cfg.WebAppURL, Format(ActionNew, 0), 0)
+		kb.AddRow().AddOpenApp("Запустить приложение", b.app, Format(ActionNew, 0), 0)
 		return b.send(ctx, upd.GetChatID(), "Создадим собрание", kb)
 	case "/status":
-		// TODO: создать при формировании БД
-		return nil
+		return b.sendStatus(ctx, upd)
 	default:
 		return nil
 	}
@@ -122,7 +132,7 @@ func (b *Bot) onBotAdded(ctx context.Context, upd *schemes.BotAddedToChatUpdate)
 
 	if len(meetings) == 0 {
 		kb := b.api.Messages.NewKeyboardBuilder()
-		kb.AddRow().AddOpenApp("Создать собрание", b.cfg.WebAppURL, Format(ActionNew, 0), 0)
+		kb.AddRow().AddOpenApp("Создать собрание", b.app, Format(ActionNew, 0), 0)
 
 		return b.send(ctx, upd.ChatId,
 			"Готов помочь с собранием собственников. Сначала создайте собрание, "+
@@ -170,7 +180,11 @@ func (b *Bot) onCallback(ctx context.Context, upd *schemes.MessageCallbackUpdate
 		}
 		chatID := upd.Message.Recipient.ChatId
 
-		if err := b.store.BindChat(ctx, payload.ID, chatID); err != nil {
+		err := b.store.BindChat(ctx, payload.ID, chatID, upd.Callback.User.UserId)
+		if errors.Is(err, storage.ErrNotFound) {
+			return b.send(ctx, chatID, "Привязать чат может только инициатор собрания.", nil)
+		}
+		if err != nil {
 			return fmt.Errorf("привязка чата %d к собранию %d: %w", chatID, payload.ID, err)
 		}
 
@@ -198,14 +212,14 @@ func (b *Bot) onCallback(ctx context.Context, upd *schemes.MessageCallbackUpdate
 
 		if len(meetings) == 0 {
 			kb := b.api.Messages.NewKeyboardBuilder()
-			kb.AddRow().AddOpenApp("Создать собрание", b.cfg.WebAppURL, Format(ActionNew, 0), 0)
+			kb.AddRow().AddOpenApp("Создать собрание", b.app, Format(ActionNew, 0), 0)
 
 			return b.send(ctx, chatID, "Пока собраний нет.", kb)
 		}
 
 		kb := b.api.Messages.NewKeyboardBuilder()
 		for _, meeting := range meetings {
-			kb.AddRow().AddOpenApp(label(meeting), b.cfg.WebAppURL, Format(ActionOpen, meeting.ID), 0)
+			kb.AddRow().AddOpenApp(label(meeting), b.app, Format(ActionOpen, meeting.ID), 0)
 		}
 
 		return b.send(ctx, chatID, "Ваши собрания:", kb)
