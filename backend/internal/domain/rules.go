@@ -1,5 +1,7 @@
 package domain
 
+import "math"
+
 // Choice — вариант ответа. Значения латиницей: они уходят в базу
 // и в JSON, а подписи «за» / «против» / «воздержался» живут в интерфейсе.
 type Choice string
@@ -138,7 +140,7 @@ func (r Rule) Denominator(total, participating float64) float64 {
 // При строгом неравенстве само это число порога ещё не даёт:
 // его нужно превысить.
 func (r Rule) Required(base float64) float64 {
-	return base * float64(r.Threshold)
+	return roundArea(base * float64(r.Threshold))
 }
 
 // Passed сравнивает долю набранных голосов с порогом.
@@ -158,9 +160,15 @@ func (r Rule) Passed(sum, base float64) bool {
 
 // Gap — сколько метров не хватает до порога.
 func (r Rule) Gap(sum, base float64) float64 {
-	gap := r.Required(base) - sum
+	gap := roundArea(r.Required(base) - sum)
 	if gap < 0 {
 		return 0
 	}
 	return gap
+}
+
+// roundArea округляет метры до сотых, как они хранятся в базе.
+// Без этого 2/3 от 6000 м² даёт 3999.9999999999995 и «не хватает 0.0000001 м²».
+func roundArea(area float64) float64 {
+	return math.Round(area*100) / 100
 }
