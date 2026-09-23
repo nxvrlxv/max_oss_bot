@@ -18,7 +18,7 @@ var requiredColumns = []string{"№ помещения", "Адрес объек�
 func DetectDelimiter(header []byte) (rune, error) {
 	header = bytes.TrimPrefix(header, []byte("\uFEFF"))
 	if !utf8.Valid(header) {
-		return 0, fmt.Errorf("registry must be UTF-8 encoded")
+		return 0, fmt.Errorf("файл должен быть в кодировке UTF-8 — пересохраните его как «CSV UTF-8»")
 	}
 	var detected rune
 	for _, sep := range []rune{';', ',', '\t'} {
@@ -32,19 +32,25 @@ func DetectDelimiter(header []byte) (rune, error) {
 		valid := true
 		for _, name := range names {
 			key := clean(name)
-			if columns[key] { valid = false }
+			if columns[key] {
+				valid = false
+			}
 			columns[key] = true
 		}
 		for _, name := range requiredColumns {
-			if !columns[name] { valid = false }
+			if !columns[name] {
+				valid = false
+			}
 		}
 		if valid {
-			if detected != 0 { return 0, fmt.Errorf("ambiguous CSV delimiter") }
+			if detected != 0 {
+				return 0, fmt.Errorf("не удалось определить разделитель столбцов")
+			}
 			detected = sep
 		}
 	}
 	if detected == 0 {
-		return 0, fmt.Errorf("invalid CSV header: expected separator ';', ',' or tab and unique columns: %s", strings.Join(requiredColumns, ", "))
+		return 0, fmt.Errorf("в первой строке файла нужны столбцы без повторов, через «;», «,» или табуляцию: %s", strings.Join(requiredColumns, ", "))
 	}
 	return detected, nil
 }
@@ -56,11 +62,15 @@ func readHeader(src *bufio.Reader) ([]byte, error) {
 	for {
 		part, err := src.ReadSlice('\n')
 		if len(header)+len(part) > maxHeaderBytes {
-			return nil, fmt.Errorf("CSV header exceeds %d bytes", maxHeaderBytes)
+			return nil, fmt.Errorf("первая строка файла длиннее %d байт — это не похоже на реестр", maxHeaderBytes)
 		}
 		header = append(header, part...)
-		if err == bufio.ErrBufferFull { continue }
-		if err != nil && err != io.EOF { return nil, fmt.Errorf("read CSV header: %w", err) }
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("не удалось прочитать заголовок: %w", err)
+		}
 		content := bytes.TrimSpace(bytes.TrimPrefix(header, []byte("\uFEFF")))
 		if err == io.EOF || (bytes.Count(header, []byte{'"'})%2 == 0 && len(content) > 0) {
 			return bytes.TrimPrefix(header, []byte("\uFEFF")), nil
