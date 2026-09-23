@@ -1,0 +1,83 @@
+# Запуск: docker compose up -d --build
+# Переменные — в .env рядом с этим файлом, образец в .env.example.
+# Наружу смотрит только web (80/443); база, API и бот — во внутренней сети.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oss}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oss}
+      POSTGRES_DB: ${POSTGRES_DB:-oss}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: ./backend
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: &database_url postgres://${POSTGRES_USER:-oss}:${POSTGRES_PASSWORD:-oss}@db:5432/${POSTGRES_DB:-oss}?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: ./backend
+    command: ["api"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: *database_url
+      API_ADDR: ":8080"
+      # Вход без initData на сервере запрещён, что бы ни лежало в .env.
+      DEV_MAX_ID: ""
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  bot:
+    build: ./backend
+    command: ["bot"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Внутри compose база доступна по имени сервиса, а не через localhost.
+      DATABASE_URL: *database_url
+      WEBHOOK_ADDR: ":8081"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build: ./webapp
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Здесь Caddy хранит сертификаты: без тома при каждом пересоздании
+      # контейнера он будет выпускать новый и упрётся в лимиты Let's Encrypt.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
