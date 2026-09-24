@@ -3,8 +3,12 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ApiError } from '../api/client';
 import { useSecretTaps } from '../lib/nav';
 
-/** Загрузка данных экрана: состояние, ошибка и перезапрос. */
-export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
+/**
+ * Загрузка данных экрана: состояние, ошибка и перезапрос.
+ * refreshMs — фоновое обновление, пока экран на виду: голоса приходят
+ * от соседей, и дашборд без него показывал бы цифры на момент открытия.
+ */
+export function useLoad<T>(load: () => Promise<T>, deps: unknown[], refreshMs?: number) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,6 +28,21 @@ export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
   }, []);
 
   useEffect(() => { void reload(); }, deps);
+
+  // Тихое обновление: без спиннера, а при сбое сети остаются прежние данные.
+  useEffect(() => {
+    if (!refreshMs) return;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadRef.current().then(setData).catch(() => {});
+    };
+    const timer = window.setInterval(refresh, refreshMs);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [refreshMs]);
 
   return { data, setData, error, loading, reload };
 }

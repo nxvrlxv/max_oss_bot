@@ -4,7 +4,7 @@ import { api, ApiError } from '../../api/client';
 import { choiceLabels, type Choice, type Meeting } from '../../api/types';
 import { BottomBar, CheckCircle, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic, shareLink } from '../../lib/bridge';
-import { area, dayTime } from '../../lib/format';
+import { area, dayTime, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
 const choices: Choice[] = ['for', 'against', 'abstain'];
@@ -30,6 +30,8 @@ export function Vote({ id }: { id: number }) {
 
   const open = meeting.status === 'active';
   const pending = meeting.claims.filter((c) => c.status === 'pending');
+  // Свою подтверждённую квартиру инициатор может снять: подтверждал её он сам.
+  const ownConfirmed = meeting.is_initiator ? meeting.claims.filter((c) => c.status === 'confirmed') : [];
   const allPending = meeting.claims.length > 0 && pending.length === meeting.claims.length;
   const choosing = open && (!meeting.choice || editing);
 
@@ -99,6 +101,17 @@ export function Vote({ id }: { id: number }) {
             ))}
           </div>
         </>
+      )}
+
+      {open && ownConfirmed.length > 0 && !picked && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center' }}>
+          {ownConfirmed.map((claim) => (
+            <button key={claim.id} type="button" className="btn link" style={{ width: 'auto' }}
+              onClick={() => cancelClaim(claim.id)}>
+              Кв. {claim.flat_number} — не моя квартира
+            </button>
+          ))}
+        </div>
       )}
 
       {meeting.status === 'finished' && <FinishedResult meeting={meeting} />}
@@ -172,7 +185,13 @@ function WeightLine({ meeting }: { meeting: Meeting }) {
   const numbers = meeting.claims.map((c) => c.flat_number);
   const weight = meeting.claims.reduce((sum, c) => sum + (c.status === 'confirmed' ? c.weight : c.flat_area), 0);
   const label = numbers.length === 1 ? `квартира ${numbers[0]}` : `квартиры ${numbers.join(', ')}`;
-  return <span>Ваш голос: {label} · {area(weight)}</span>;
+  const name = meeting.claims.find((c) => c.owner_name)?.owner_name;
+  return (
+    <>
+      <span>Ваш голос: {label} · {area(weight)}</span>
+      {name && <span>По реестру: {shortName(name)}</span>}
+    </>
+  );
 }
 
 function VotedCard({ meeting }: { meeting: Meeting }) {

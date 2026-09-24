@@ -4,7 +4,7 @@ import { api, ApiError } from '../../api/client';
 import type { Flat, RegistryOwner } from '../../api/types';
 import { BottomBar, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic } from '../../lib/bridge';
-import { area, dayTime } from '../../lib/format';
+import { area, dayTime, samePerson } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
 // Выбор своей квартиры. Соседу ФИО собственников не показываем:
@@ -62,8 +62,10 @@ export function PickFlat({ id }: { id: number }) {
   }
 
   if (owners && chosen) {
+    // Кем человек уже подтверждён по другой квартире — тем он и остаётся.
+    const myName = meeting.claims.find((c) => c.status === 'confirmed' && c.owner_name)?.owner_name;
     return (
-      <OwnerStep flat={chosen} owners={owners} sending={sending}
+      <OwnerStep flat={chosen} owners={owners} myName={myName} sending={sending}
         onBack={() => setOwners(null)}
         onConfirm={async (ownerId) => {
           setSending(true);
@@ -126,14 +128,16 @@ export function PickFlat({ id }: { id: number }) {
 }
 
 // Шаг инициатора: кто он в реестре этой квартиры.
-function OwnerStep({ flat, owners, sending, onBack, onConfirm }: {
+function OwnerStep({ flat, owners, myName, sending, onBack, onConfirm }: {
   flat: Flat;
   owners: RegistryOwner[];
+  myName?: string;
   sending: boolean;
   onBack: () => void;
   onConfirm: (ownerId: number) => void;
 }) {
-  const free = owners.filter((o) => !o.taken);
+  const fits = (name: string) => !myName || samePerson(myName, name);
+  const free = owners.filter((o) => !o.taken && fits(o.name));
   const [ownerId, setOwnerId] = useState<number | null>(free.length === 1 ? free[0].id : null);
 
   return (
@@ -141,21 +145,43 @@ function OwnerStep({ flat, owners, sending, onBack, onConfirm }: {
       <div className="header">
         <div className="caption">Кв. {flat.number} · {area(flat.area)}</div>
         <h1 className="h1">Кто вы по реестру?</h1>
-        <div className="caption">Голос будет учтён с долей этого собственника</div>
+        <div className="caption">
+          {myName
+            ? `Вы уже выбраны как «${myName}» — в другой квартире можно выбрать только себя же`
+            : 'Голос будет учтён с долей этого собственника. Выбор закрепит ваше ФИО для остальных квартир'}
+        </div>
       </div>
 
+      {free.length === 0 && (
+        <div className="banner orange" style={{ marginBottom: 12 }}>
+          <div className="body">
+            <div className="strong">
+              {myName ? `В этой квартире нет собственника «${myName}»` : 'Все собственники уже подтверждены'}
+            </div>
+            <div className="caption">Выберите другую квартиру</div>
+          </div>
+        </div>
+      )}
+
       <div className="options">
-        {owners.map((owner) => (
-          <button key={owner.id} type="button" className="option" aria-pressed={ownerId === owner.id}
-            disabled={owner.taken} style={{ opacity: owner.taken ? 0.5 : 1 }}
-            onClick={() => { haptic.select(); setOwnerId(owner.id); }}>
-            <span className="radio" />
-            <span className="desc">
-              <span className="strong">{owner.name || 'Без имени'}</span>
-              <span className="caption">{owner.taken ? 'уже подтверждён за другим человеком' : `доля ${area(owner.owned_area)}`}</span>
-            </span>
-          </button>
-        ))}
+        {owners.map((owner) => {
+          const blocked = owner.taken || !fits(owner.name);
+          return (
+            <button key={owner.id} type="button" className="option" aria-pressed={ownerId === owner.id}
+              disabled={blocked} style={{ opacity: blocked ? 0.5 : 1 }}
+              onClick={() => { haptic.select(); setOwnerId(owner.id); }}>
+              <span className="radio" />
+              <span className="desc">
+                <span className="strong">{owner.name || 'Без имени'}</span>
+                <span className="caption">
+                  {owner.taken ? 'уже подтверждён за другим человеком'
+                    : !fits(owner.name) ? 'другое ФИО'
+                    : `доля ${area(owner.owned_area)}`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <button type="button" className="btn link" style={{ marginTop: 8 }} onClick={onBack}>

@@ -4,7 +4,7 @@ import { api } from '../../api/client';
 import { choiceLabels, type Meeting, type Threshold } from '../../api/types';
 import { InviteCard } from '../../components/InviteCard';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
-import { area, dayTime, initials, percent, shortName } from '../../lib/format';
+import { area, dayTime, initials, percent, plural, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
 const PAGE = 7;
@@ -12,7 +12,7 @@ const PAGE = 7;
 // Ход голосования для инициатора: явка, оба порога, кого не хватает.
 export function Dashboard({ id }: { id: number }) {
   const nav = useNav();
-  const { data, error, reload } = useLoad(() => Promise.all([api.meeting(id), api.dashboard(id)]), [id]);
+  const { data, error, reload } = useLoad(() => Promise.all([api.meeting(id), api.dashboard(id)]), [id], 10_000);
   const [shown, setShown] = useState(PAGE);
 
   if (error) return <Failure message={error} onRetry={reload} />;
@@ -79,7 +79,9 @@ export function Dashboard({ id }: { id: number }) {
             <span className="count">{board.pending_claims}</span>
           </div>
           <div className="caption" style={{ marginTop: 4 }}>
-            Голоса по ним сохранены, но не считаются, пока вы не сверите собственников с реестром
+            {board.pending_votes.count > 0
+              ? `${board.pending_votes.count} ${plural(board.pending_votes.count, ['голос уже отдан', 'голоса уже отданы', 'голосов уже отданы'])} — в итог попадут, когда вы сверите собственников с реестром`
+              : 'Сверьте собственников с реестром — после этого их голоса попадут в итог'}
           </div>
         </button>
       )}

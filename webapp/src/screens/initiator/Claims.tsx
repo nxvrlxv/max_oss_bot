@@ -4,12 +4,12 @@ import { api, ApiError } from '../../api/client';
 import type { PendingClaim } from '../../api/types';
 import { Failure, Loading, useLoad } from '../../components/ui';
 import { haptic } from '../../lib/bridge';
-import { area, dayTime } from '../../lib/format';
+import { area, dayTime, samePerson } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
 // Очередь заявок: человек из MAX против собственников квартиры по реестру.
 export function Claims({ id }: { id: number }) {
-  const { data, setData, error, reload } = useLoad(() => api.pendingClaims(id), [id]);
+  const { data, setData, error, reload } = useLoad(() => api.pendingClaims(id), [id], 15_000);
 
   if (error) return <Failure message={error} onRetry={reload} />;
   if (!data) return <Loading />;
@@ -39,7 +39,10 @@ export function Claims({ id }: { id: number }) {
 function ClaimCard({ meetingId, claim, onDone }: { meetingId: number; claim: PendingClaim; onDone: () => void }) {
   const nav = useNav();
   const owners = claim.owners ?? [];
-  const free = owners.filter((o) => !o.taken);
+  // Уже подтверждённый по другой квартире человек — это тот же собственник:
+  // доли с другим ФИО ему не подходят, сервер их и не примет.
+  const fits = (name: string) => !claim.confirmed_as || samePerson(claim.confirmed_as, name);
+  const free = owners.filter((o) => !o.taken && fits(o.name));
   const [ownerId, setOwnerId] = useState<number | null>(free.length === 1 ? free[0].id : null);
   const [busy, setBusy] = useState(false);
 
@@ -63,22 +66,37 @@ function ClaimCard({ meetingId, claim, onDone }: { meetingId: number; claim: Pen
       </div>
       <div className="strong" style={{ marginTop: 8 }}>{claim.user_name}</div>
       <div className="caption">в MAX · заявка {dayTime(claim.created_at)}</div>
+      {claim.confirmed_as && (
+        <div className="caption" style={{ marginTop: 4 }}>Уже подтверждён как «{claim.confirmed_as}»</div>
+      )}
 
       <div className="divider" style={{ margin: '12px 0' }} />
       <div className="caption" style={{ marginBottom: 8 }}>Кто это по реестру?</div>
       <div className="stack" style={{ gap: 8 }}>
-        {owners.map((owner) => (
-          <button key={owner.id} type="button" className="option" aria-pressed={ownerId === owner.id}
-            disabled={owner.taken} style={{ minHeight: 56, opacity: owner.taken ? 0.5 : 1 }}
-            onClick={() => setOwnerId(owner.id)}>
-            <span className="radio" />
-            <span className="desc">
-              <span className="strong">{owner.name || 'Без имени'}</span>
-              <span className="caption">{owner.taken ? 'уже подтверждён за другим человеком' : `доля ${area(owner.owned_area)}`}</span>
-            </span>
-          </button>
-        ))}
+        {owners.map((owner) => {
+          const blocked = owner.taken || !fits(owner.name);
+          return (
+            <button key={owner.id} type="button" className="option" aria-pressed={ownerId === owner.id}
+              disabled={blocked} style={{ minHeight: 56, opacity: blocked ? 0.5 : 1 }}
+              onClick={() => setOwnerId(owner.id)}>
+              <span className="radio" />
+              <span className="desc">
+                <span className="strong">{owner.name || 'Без имени'}</span>
+                <span className="caption">
+                  {owner.taken ? 'уже подтверждён за другим человеком'
+                    : !fits(owner.name) ? 'другое ФИО — не этот человек'
+                    : `доля ${area(owner.owned_area)}`}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
+      {free.length === 0 && (
+        <p className="caption" style={{ marginTop: 8 }}>
+          Подходящего собственника нет — заявку остаётся отклонить
+        </p>
+      )}
 
       <div className="btn-row" style={{ marginTop: 12 }}>
         <button type="button" className="btn secondary" disabled={busy}

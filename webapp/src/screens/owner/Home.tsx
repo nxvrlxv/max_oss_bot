@@ -7,7 +7,7 @@ import { useNav, useSecretTaps } from '../../lib/nav';
 // Главный экран: собрания, где человек инициатор или подал заявку на квартиру.
 export function Home() {
   const nav = useNav();
-  const { data, error, loading, reload } = useLoad(() => api.me(), []);
+  const { data, error, loading, reload } = useLoad(() => api.me(), [], 30_000);
   // Пять быстрых нажатий на заголовок — панель диагностики запуска.
   const tapTitle = useSecretTaps();
 

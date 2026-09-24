@@ -19,6 +19,7 @@ export interface Claim {
   flat_number: string;
   flat_area: number;
   status: ClaimStatus;
+  owner_name?: string; // кем подтверждён по реестру
   weight: number;
   choice?: Choice;
   voted_at?: string;
@@ -84,6 +85,7 @@ export interface Dashboard {
   not_voted: FlatGap[] | null;
   not_voted_area: number;
   pending_claims: number;
+  pending_votes: { count: number; area: number };
 }
 
 export interface RegistryOwner {
@@ -95,6 +97,7 @@ export interface RegistryOwner {
 
 export interface PendingClaim extends Claim {
   user_name: string;
+  confirmed_as?: string; // уже подтверждён под этим ФИО по другой квартире
   owners: RegistryOwner[] | null;
 }
 

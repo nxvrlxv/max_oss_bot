@@ -40,6 +40,15 @@ export function shortName(name: string): string {
   return `${parts[0]} ${parts.slice(1).map((p) => `${p[0]}.`).join(' ')}`;
 }
 
+/**
+ * Одно ли это ФИО — так же, как сравнивает сервер: без регистра,
+ * лишних пробелов и разницы «е/ё». Один аккаунт — один человек из реестра.
+ */
+export function samePerson(a: string, b: string): boolean {
+  const normalize = (name: string) => name.trim().split(/\s+/).join(' ').toLowerCase().replaceAll('ё', 'е');
+  return normalize(a) === normalize(b);
+}
+
 /** Инициалы для аватара: «Кузнецова Елена» → «КЕ» */
 export function initials(name: string): string {
   const parts = name.replace(/[«»"]/g, '').trim().split(/\s+/).filter(Boolean);
