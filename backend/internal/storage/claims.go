@@ -64,65 +64,111 @@ type PendingClaim struct {
 func (s *Store) ClaimFlat(ctx context.Context, meetingID int, flatNumber string, user User) (claim Claim, fresh bool, err error) {
 	var claimID int
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := acceptingVotes(ctx, tx, meetingID); err != nil {
-			return err
-		}
-
-		var flatID int
-		err := tx.QueryRow(ctx,
-			`SELECT id FROM flats WHERE voting_id = $1 AND number = $2`,
-			meetingID, flatNumber).Scan(&flatID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-
-		userID, err := upsertUser(ctx, tx, user)
-		if err != nil {
-			return err
-		}
-
-		var pending int
-		err = tx.QueryRow(ctx, `
-			SELECT count(*) FROM claims
-			WHERE voting_id = $1 AND user_id = $2 AND status = 'pending' AND flat_id <> $3`,
-			meetingID, userID, flatID).Scan(&pending)
-		if err != nil {
-			return err
-		}
-		if pending >= maxPendingClaims {
-			return ErrTooManyClaims
-		}
-
-		var previous string
-		err = tx.QueryRow(ctx, `
-			SELECT status FROM claims WHERE voting_id = $1 AND flat_id = $2 AND user_id = $3`,
-			meetingID, flatID, userID).Scan(&previous)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		fresh = previous == "" || previous == ClaimRejected
-
-		return tx.QueryRow(ctx, `
-			INSERT INTO claims (voting_id, flat_id, user_id)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (voting_id, flat_id, user_id) DO UPDATE
-			SET status = CASE WHEN claims.status = 'rejected' THEN 'pending' ELSE claims.status END,
-			    decided_at = CASE WHEN claims.status = 'rejected' THEN NULL ELSE claims.decided_at END
-			RETURNING id`,
-			meetingID, flatID, userID).Scan(&claimID)
+		claimID, fresh, err = claimTx(ctx, tx, meetingID, flatNumber, user)
+		return err
 	})
 	if err != nil {
 		return Claim{}, false, err
 	}
+	claim, err = s.claim(ctx, claimID)
+	return claim, fresh, err
+}
 
+// ClaimOwnFlat — заявка инициатора на свою квартиру. Реестр у него и так
+// перед глазами, поэтому собственника он указывает сразу, и заявка
+// подтверждается в той же транзакции: гонять её через свою же очередь незачем.
+func (s *Store) ClaimOwnFlat(ctx context.Context, meetingID int, flatNumber string, user User, ownerID int) (Claim, error) {
+	var claimID int
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		claimID, _, err = claimTx(ctx, tx, meetingID, flatNumber, user)
+		if err != nil {
+			return err
+		}
+
+		var status string
+		var owner *int
+		if err := tx.QueryRow(ctx, `SELECT status, owner_id FROM claims WHERE id = $1`, claimID).Scan(&status, &owner); err != nil {
+			return err
+		}
+		// Повторное нажатие после подтверждения — не ошибка, если собственник тот же.
+		if status == ClaimConfirmed {
+			if owner != nil && *owner == ownerID {
+				return nil
+			}
+			return ErrOwnerTaken
+		}
+		return confirmTx(ctx, tx, meetingID, claimID, ownerID)
+	})
+	if err != nil {
+		return Claim{}, err
+	}
+	return s.claim(ctx, claimID)
+}
+
+func (s *Store) claim(ctx context.Context, claimID int) (Claim, error) {
 	claims, err := s.claims(ctx, `c.id = $1`, claimID)
 	if err != nil {
-		return Claim{}, false, err
+		return Claim{}, err
 	}
-	return claims[0], fresh, nil
+	if len(claims) == 0 {
+		return Claim{}, ErrNotFound
+	}
+	return claims[0], nil
+}
+
+// claimTx создаёт или поднимает заявку внутри транзакции.
+func claimTx(ctx context.Context, tx pgx.Tx, meetingID int, flatNumber string, user User) (claimID int, fresh bool, err error) {
+	if err := acceptingVotes(ctx, tx, meetingID); err != nil {
+		return 0, false, err
+	}
+
+	var flatID int
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM flats WHERE voting_id = $1 AND number = $2`,
+		meetingID, flatNumber).Scan(&flatID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, ErrNotFound
+	}
+	if err != nil {
+		return 0, false, err
+	}
+
+	userID, err := upsertUser(ctx, tx, user)
+	if err != nil {
+		return 0, false, err
+	}
+
+	var pending int
+	err = tx.QueryRow(ctx, `
+		SELECT count(*) FROM claims
+		WHERE voting_id = $1 AND user_id = $2 AND status = 'pending' AND flat_id <> $3`,
+		meetingID, userID, flatID).Scan(&pending)
+	if err != nil {
+		return 0, false, err
+	}
+	if pending >= maxPendingClaims {
+		return 0, false, ErrTooManyClaims
+	}
+
+	var previous string
+	err = tx.QueryRow(ctx, `
+		SELECT status FROM claims WHERE voting_id = $1 AND flat_id = $2 AND user_id = $3`,
+		meetingID, flatID, userID).Scan(&previous)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, err
+	}
+	fresh = previous == "" || previous == ClaimRejected
+
+	err = tx.QueryRow(ctx, `
+		INSERT INTO claims (voting_id, flat_id, user_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (voting_id, flat_id, user_id) DO UPDATE
+		SET status = CASE WHEN claims.status = 'rejected' THEN 'pending' ELSE claims.status END,
+		    decided_at = CASE WHEN claims.status = 'rejected' THEN NULL ELSE claims.decided_at END
+		RETURNING id`,
+		meetingID, flatID, userID).Scan(&claimID)
+	return claimID, fresh, err
 }
 
 // CancelClaim — «это не моя квартира»: человек сам отзывает неразобранную заявку.
@@ -243,6 +289,25 @@ func (s *Store) PendingClaims(ctx context.Context, meetingID int) ([]PendingClai
 	return pending, nil
 }
 
+// FlatOwners — собственники помещения по реестру: инициатор выбирает среди них себя.
+func (s *Store) FlatOwners(ctx context.Context, meetingID int, flatNumber string) ([]RegistryOwner, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT o.id, COALESCE(o.full_name, o.org_name, ''),
+		       COALESCE(o.owned_area, ROUND(f.area * o.share, 2)),
+		       EXISTS (SELECT 1 FROM claims c WHERE c.owner_id = o.id AND c.status = 'confirmed')
+		FROM owners o JOIN flats f ON f.id = o.flat_id
+		WHERE f.voting_id = $1 AND f.number = $2
+		ORDER BY o.id`, meetingID, flatNumber)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (RegistryOwner, error) {
+		var o RegistryOwner
+		err := row.Scan(&o.ID, &o.Name, &o.OwnedArea, &o.Taken)
+		return o, err
+	})
+}
+
 // PendingCount — сколько заявок ждёт инициатора.
 func (s *Store) PendingCount(ctx context.Context, meetingID int) (int, error) {
 	var n int
@@ -256,63 +321,67 @@ func (s *Store) PendingCount(ctx context.Context, meetingID int) (int, error) {
 // даже если срок уже вышел: голос был подан вовремя.
 func (s *Store) ConfirmClaim(ctx context.Context, meetingID, claimID, ownerID int) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var (
-			flatID, userID int
-			choice         *string
-			votedAt        *time.Time
-		)
-		err := tx.QueryRow(ctx, `
-			SELECT flat_id, user_id, choice, voted_at FROM claims
-			WHERE id = $1 AND voting_id = $2 AND status = 'pending'
-			FOR UPDATE`, claimID, meetingID).Scan(&flatID, &userID, &choice, &votedAt)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-
-		var taken bool
-		err = tx.QueryRow(ctx, `
-			SELECT EXISTS (SELECT 1 FROM claims WHERE owner_id = $2 AND status = 'confirmed')
-			FROM owners WHERE id = $2 AND flat_id = $1
-			FOR UPDATE`, flatID, ownerID).Scan(&taken)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("собственник %d не из этого помещения: %w", ownerID, ErrNotFound)
-		}
-		if err != nil {
-			return err
-		}
-		if taken {
-			return ErrOwnerTaken
-		}
-
-		if _, err := tx.Exec(ctx, `
-			UPDATE owners
-			SET user_id = $2, status = 'confirmed', confirmed_at = now(),
-			    claimed_at = (SELECT created_at FROM claims WHERE id = $3)
-			WHERE id = $1`, ownerID, userID, claimID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE claims SET status = 'confirmed', owner_id = $2, decided_at = now()
-			WHERE id = $1`, claimID, ownerID); err != nil {
-			return err
-		}
-
-		if choice == nil {
-			return nil
-		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO votes (voting_id, owner_id, value, weight_area, status, created_at, updated_at)
-			SELECT $1, o.id, $3, COALESCE(o.owned_area, ROUND(f.area * o.share, 2)), 'confirmed', $4, $4
-			FROM owners o JOIN flats f ON f.id = o.flat_id
-			WHERE o.id = $2
-			ON CONFLICT (voting_id, owner_id) DO UPDATE
-			SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
-			meetingID, ownerID, *choice, votedAt)
-		return err
+		return confirmTx(ctx, tx, meetingID, claimID, ownerID)
 	})
+}
+
+func confirmTx(ctx context.Context, tx pgx.Tx, meetingID, claimID, ownerID int) error {
+	var (
+		flatID, userID int
+		choice         *string
+		votedAt        *time.Time
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT flat_id, user_id, choice, voted_at FROM claims
+		WHERE id = $1 AND voting_id = $2 AND status = 'pending'
+		FOR UPDATE`, claimID, meetingID).Scan(&flatID, &userID, &choice, &votedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	var taken bool
+	err = tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM claims WHERE owner_id = $2 AND status = 'confirmed')
+		FROM owners WHERE id = $2 AND flat_id = $1
+		FOR UPDATE`, flatID, ownerID).Scan(&taken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("собственник %d не из этого помещения: %w", ownerID, ErrNotFound)
+	}
+	if err != nil {
+		return err
+	}
+	if taken {
+		return ErrOwnerTaken
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE owners
+		SET user_id = $2, status = 'confirmed', confirmed_at = now(),
+		    claimed_at = (SELECT created_at FROM claims WHERE id = $3)
+		WHERE id = $1`, ownerID, userID, claimID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE claims SET status = 'confirmed', owner_id = $2, decided_at = now()
+		WHERE id = $1`, claimID, ownerID); err != nil {
+		return err
+	}
+
+	if choice == nil {
+		return nil
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO votes (voting_id, owner_id, value, weight_area, status, created_at, updated_at)
+		SELECT $1, o.id, $3, COALESCE(o.owned_area, ROUND(f.area * o.share, 2)), 'confirmed', $4, $4
+		FROM owners o JOIN flats f ON f.id = o.flat_id
+		WHERE o.id = $2
+		ON CONFLICT (voting_id, owner_id) DO UPDATE
+		SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+		meetingID, ownerID, *choice, votedAt)
+	return err
 }
 
 // RejectClaim отклоняет заявку. Голос из неё в подсчёт не попадает.

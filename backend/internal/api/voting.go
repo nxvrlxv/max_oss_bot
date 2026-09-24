@@ -19,6 +19,7 @@ func (s *Server) claimFlat(w http.ResponseWriter, r *http.Request) {
 
 	var in struct {
 		FlatNumber string `json:"flat_number"`
+		OwnerID    int    `json:"owner_id"` // только инициатор: сразу указывает себя по реестру
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -30,16 +31,34 @@ func (s *Server) claimFlat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := currentUser(r)
-	claim, fresh, err := s.store.ClaimFlat(r.Context(), meeting.ID, number,
-		storage.User{MaxID: user.ID, Name: user.Name(), Username: user.Username})
+	owner := storage.User{MaxID: user.ID, Name: user.Name(), Username: user.Username}
+	isInitiator := meeting.InitiatorID == user.ID
+
+	// Инициатор голосует тем же путём, что все, но свою заявку
+	// подтверждает сразу: реестр у него перед глазами.
+	if in.OwnerID != 0 {
+		if !isInitiator {
+			writeError(w, http.StatusForbidden, "Собственника по реестру указывает только инициатор")
+			return
+		}
+		claim, err := s.store.ClaimOwnFlat(r.Context(), meeting.ID, number, owner, in.OwnerID)
+		if err != nil {
+			storeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, claim)
+		return
+	}
+
+	claim, fresh, err := s.store.ClaimFlat(r.Context(), meeting.ID, number, owner)
 	if err != nil {
 		storeError(w, r, err)
 		return
 	}
 
 	// Уведомление — фоном и только о новой заявке: повторное нажатие
-	// не должно слать инициатору второе сообщение.
-	if fresh {
+	// не должно слать инициатору второе сообщение. Себе инициатор не пишет.
+	if fresh && !isInitiator {
 		name := user.Name()
 		if name == "" {
 			name = "собственник без имени в профиле"
@@ -162,6 +181,20 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		"not_voted_area": notVotedArea,
 		"pending_claims": pending,
 	})
+}
+
+// flatOwners — собственники квартиры по реестру, чтобы инициатор выбрал себя.
+func (s *Server) flatOwners(w http.ResponseWriter, r *http.Request) {
+	owners, err := s.store.FlatOwners(r.Context(), meetingFrom(r).ID, r.PathValue("number"))
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	if len(owners) == 0 {
+		writeError(w, http.StatusNotFound, "Такой квартиры нет в реестре")
+		return
+	}
+	writeJSON(w, http.StatusOK, owners)
 }
 
 func (s *Server) pendingClaims(w http.ResponseWriter, r *http.Request) {

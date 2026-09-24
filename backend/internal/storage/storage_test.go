@@ -333,3 +333,55 @@ func TestVotingFlow(t *testing.T) {
 		t.Errorf("голос после завершения: %v", err)
 	}
 }
+
+// Инициатор голосует как собственник: заявка на свою квартиру
+// подтверждается сразу, голос считается без очереди.
+func TestInitiatorOwnFlat(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+
+	flats, _ := demoFlats(t)
+	meeting := newMeeting(t, db, 10)
+	if err := db.ImportRegistry(ctx, meeting.ID, flats); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Publish(ctx, meeting.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	number := flats[0].Number
+	owners, err := db.FlatOwners(ctx, meeting.ID, number)
+	if err != nil || len(owners) == 0 {
+		t.Fatalf("собственники кв. %s: %+v, %v", number, owners, err)
+	}
+	initiator := User{MaxID: 10, Name: "Инициатор"}
+
+	claim, err := db.ClaimOwnFlat(ctx, meeting.ID, number, initiator, owners[0].ID)
+	if err != nil || claim.Status != ClaimConfirmed || claim.Weight != owners[0].OwnedArea {
+		t.Fatalf("своя квартира: %+v, %v", claim, err)
+	}
+	if pending, _ := db.PendingCount(ctx, meeting.ID); pending != 0 {
+		t.Errorf("своя заявка попала в очередь: %d", pending)
+	}
+
+	// Повторное нажатие — не ошибка.
+	if again, err := db.ClaimOwnFlat(ctx, meeting.ID, number, initiator, owners[0].ID); err != nil || again.ID != claim.ID {
+		t.Errorf("повтор: %+v, %v", again, err)
+	}
+
+	if err := db.Vote(ctx, meeting.ID, initiator.MaxID, domain.ChoiceFor); err != nil {
+		t.Fatal(err)
+	}
+	if result, _ := db.Result(ctx, meeting.ID); result.Tally.For != owners[0].OwnedArea {
+		t.Errorf("голос инициатора не учтён: %+v", result.Tally)
+	}
+
+	// Собственник из другой квартиры и уже занятый собственник — отказ.
+	other, _ := db.FlatOwners(ctx, meeting.ID, flats[1].Number)
+	if _, err := db.ClaimOwnFlat(ctx, meeting.ID, number, User{MaxID: 11}, other[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("собственник из чужой квартиры: %v", err)
+	}
+	if _, err := db.ClaimOwnFlat(ctx, meeting.ID, number, User{MaxID: 12}, owners[0].ID); !errors.Is(err, ErrOwnerTaken) {
+		t.Errorf("занятый собственник: %v", err)
+	}
+}

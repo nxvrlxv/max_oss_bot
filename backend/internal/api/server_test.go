@@ -188,3 +188,62 @@ func TestInviteAccess(t *testing.T) {
 		t.Errorf("несуществующее приглашение: %d, хотели 404", status)
 	}
 }
+
+func TestInitiatorVotes(t *testing.T) {
+	server := testServer(t)
+	initiator := client{t: t, base: server.URL, userID: 10}
+	stranger := client{t: t, base: server.URL, userID: 20}
+
+	_, created := initiator.do("POST", "/api/meetings", map[string]any{
+		"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft",
+		"total_area": 100, "entrances_count": 1,
+		"ends_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+	})
+	meetingPath := fmt.Sprintf("/api/meetings/%d", int(created["id"].(float64)))
+	initiator.do("POST", meetingPath+"/registry", testRegistry)
+	_, published := initiator.do("POST", meetingPath+"/publish", nil)
+	token := strings.TrimPrefix(published["invite_link"].(string), "https://max.ru/oss_bot?startapp=join_")
+
+	// Список собственников квартиры — только инициатору.
+	if status, _ := stranger.do("GET", meetingPath+"/flats/1/owners", nil); status != http.StatusNotFound {
+		t.Errorf("собственники постороннему: %d, хотели 404", status)
+	}
+	req, _ := http.NewRequest("GET", server.URL+meetingPath+"/flats/1/owners", nil)
+	req.Header.Set("X-Max-Init-Data", signed(map[string]string{
+		"auth_date": strconv.FormatInt(time.Now().Unix(), 10), "user": `{"id":10}`,
+	}, testToken))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var owners []storage.RegistryOwner
+	_ = json.NewDecoder(resp.Body).Decode(&owners)
+	resp.Body.Close()
+	if len(owners) != 1 || owners[0].Name != "Иванов Иван" {
+		t.Fatalf("собственники кв. 1: %+v", owners)
+	}
+
+	// Посторонний не может сам себя подтвердить, даже с приглашением.
+	invited := stranger
+	invited.invite = token
+	if status, _ := invited.do("POST", meetingPath+"/claims", map[string]any{"flat_number": "1", "owner_id": owners[0].ID}); status != http.StatusForbidden {
+		t.Errorf("самоподтверждение постороннего: %d, хотели 403", status)
+	}
+
+	status, claim := initiator.do("POST", meetingPath+"/claims", map[string]any{"flat_number": "1", "owner_id": owners[0].ID})
+	if status != http.StatusOK || claim["status"] != "confirmed" {
+		t.Fatalf("заявка инициатора: %d %v", status, claim)
+	}
+	if status, voted := initiator.do("POST", meetingPath+"/vote", map[string]string{"choice": "for"}); status != http.StatusOK || voted["choice"] != "for" {
+		t.Fatalf("голос инициатора: %d %v", status, voted)
+	}
+
+	_, board := initiator.do("GET", meetingPath+"/dashboard", nil)
+	tally := board["tally"].(map[string]any)
+	if tally["for"].(float64) != 60 {
+		t.Errorf("голос инициатора не в итоге: %v", tally)
+	}
+	if board["pending_claims"].(float64) != 0 {
+		t.Errorf("своя заявка инициатора в очереди: %v", board["pending_claims"])
+	}
+}

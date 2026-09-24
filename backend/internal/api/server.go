@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/meetings/{id}/finish", s.auth(s.initiator(s.finish)))
 	mux.HandleFunc("GET /api/meetings/{id}/dashboard", s.auth(s.initiator(s.dashboard)))
 	mux.HandleFunc("GET /api/meetings/{id}/claims", s.auth(s.initiator(s.pendingClaims)))
+	mux.HandleFunc("GET /api/meetings/{id}/flats/{number}/owners", s.auth(s.initiator(s.flatOwners)))
 	mux.HandleFunc("POST /api/meetings/{id}/claims/{claim}/confirm", s.auth(s.initiator(s.confirmClaim)))
 	mux.HandleFunc("POST /api/meetings/{id}/claims/{claim}/reject", s.auth(s.initiator(s.rejectClaim)))
 
