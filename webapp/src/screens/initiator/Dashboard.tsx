@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { api } from '../../api/client';
 import { choiceLabels, type Meeting, type Threshold } from '../../api/types';
+import { CancelFlat } from '../../components/CancelFlat';
 import { InviteCard } from '../../components/InviteCard';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, plural, shortName } from '../../lib/format';
@@ -86,7 +87,7 @@ export function Dashboard({ id }: { id: number }) {
         </button>
       )}
 
-      <MyVoteCard meeting={meeting} />
+      <MyVoteCard meeting={meeting} onChanged={reload} />
 
       {open && meeting.invite_link && (
         <div style={{ marginTop: 12 }}>
@@ -139,7 +140,7 @@ export function Dashboard({ id }: { id: number }) {
 }
 
 // Инициатор — обычно тоже собственник, и голосует тем же путём, что соседи.
-function MyVoteCard({ meeting }: { meeting: Meeting }) {
+function MyVoteCard({ meeting, onChanged }: { meeting: Meeting; onChanged: () => void }) {
   const nav = useNav();
   const open = meeting.status === 'active';
   const hasFlat = meeting.claims.length > 0;
@@ -165,6 +166,13 @@ function MyVoteCard({ meeting }: { meeting: Meeting }) {
           onClick={() => nav.go(hasFlat ? { name: 'vote', id: meeting.id } : { name: 'pick', id: meeting.id })}>
           {!hasFlat ? 'Выбрать квартиру' : meeting.choice ? 'Изменить ответ' : 'Проголосовать'}
         </button>
+      )}
+      {open && hasFlat && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
+          {meeting.claims.map((claim) => (
+            <CancelFlat key={claim.id} meetingId={meeting.id} claim={claim} onDone={onChanged} />
+          ))}
+        </div>
       )}
     </div>
   );

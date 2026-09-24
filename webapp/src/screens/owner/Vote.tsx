@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 
 import { api, ApiError } from '../../api/client';
 import { choiceLabels, type Choice, type Meeting } from '../../api/types';
+import { CancelFlat } from '../../components/CancelFlat';
 import { BottomBar, CheckCircle, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic, shareLink } from '../../lib/bridge';
 import { area, dayTime, shortName } from '../../lib/format';
@@ -52,15 +53,8 @@ export function Vote({ id }: { id: number }) {
     }
   }
 
-  async function cancelClaim(claimId: number) {
-    try {
-      await api.cancelClaim(id, claimId);
-      const updated = await api.meeting(id);
-      setData(updated);
-    } catch (err) {
-      nav.showError(err instanceof ApiError ? err.message : 'Не удалось отозвать заявку');
-    }
-  }
+  // После снятия квартиры — свежие данные: без заявок экран сам уведёт к выбору квартиры.
+  const refresh = () => { api.meeting(id).then(setData).catch(() => {}); };
 
   if (thanks) {
     return <Thanks choice={thanks} counted={!allPending} onDone={() => setThanks(null)} />;
@@ -94,10 +88,7 @@ export function Vote({ id }: { id: number }) {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center' }}>
             {pending.map((claim) => (
-              <button key={claim.id} type="button" className="btn link" style={{ width: 'auto' }}
-                onClick={() => cancelClaim(claim.id)}>
-                Кв. {claim.flat_number} — не моя квартира
-              </button>
+              <CancelFlat key={claim.id} meetingId={id} claim={claim} onDone={refresh} />
             ))}
           </div>
         </>
@@ -106,10 +97,7 @@ export function Vote({ id }: { id: number }) {
       {open && ownConfirmed.length > 0 && !picked && (
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center' }}>
           {ownConfirmed.map((claim) => (
-            <button key={claim.id} type="button" className="btn link" style={{ width: 'auto' }}
-              onClick={() => cancelClaim(claim.id)}>
-              Кв. {claim.flat_number} — не моя квартира
-            </button>
+            <CancelFlat key={claim.id} meetingId={id} claim={claim} onDone={refresh} />
           ))}
         </div>
       )}
