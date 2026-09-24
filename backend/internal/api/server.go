@@ -220,9 +220,13 @@ func serverError(w http.ResponseWriter, r *http.Request, err error) {
 // storeError переводит ошибки хранилища в ответы для пользователя.
 func storeError(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid storage.ErrInvalid
+	var other storage.ErrOtherPerson
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Reason)
+	case errors.As(err, &other):
+		writeError(w, http.StatusConflict, "За этим аккаунтом уже подтверждён собственник «"+other.ConfirmedAs+
+			"». Одним аккаунтом голосует один человек из реестра — другой собственник голосует со своего")
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, "Не найдено")
 	case errors.Is(err, storage.ErrNotDraft):

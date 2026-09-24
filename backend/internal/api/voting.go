@@ -160,6 +160,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
+	pendingVotes, pendingArea, err := s.store.PendingVotes(ctx, meeting.ID)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
 
 	tally := result.Tally
 	decisionBase := meeting.Rule.Denominator(meeting.TotalArea, tally.Total)
@@ -180,6 +185,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		"not_voted":      coverage.NotVoted,
 		"not_voted_area": notVotedArea,
 		"pending_claims": pending,
+		// Голоса по неподтверждённым заявкам: в итог не идут, но видно, что люди голосуют.
+		// Площадь — квартир целиком: чья доля, станет ясно при подтверждении.
+		"pending_votes": map[string]any{"count": pendingVotes, "area": pendingArea},
 	})
 }
 

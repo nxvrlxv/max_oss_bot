@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -30,6 +31,15 @@ var (
 	ErrOwnerTaken = errors.New("собственник уже подтверждён за другим пользователем")
 )
 
+// ErrOtherPerson — за аккаунтом уже подтверждён собственник с другим ФИО.
+// Один аккаунт MAX — один человек: квартир у него может быть несколько,
+// но во всех он записан под одним именем.
+type ErrOtherPerson struct{ ConfirmedAs string }
+
+func (e ErrOtherPerson) Error() string {
+	return fmt.Sprintf("за аккаунтом уже подтверждён собственник «%s»", e.ConfirmedAs)
+}
+
 // Claim — заявка человека на помещение.
 type Claim struct {
 	ID         int           `json:"id"`
@@ -37,7 +47,8 @@ type Claim struct {
 	FlatNumber string        `json:"flat_number"`
 	FlatArea   float64       `json:"flat_area"`
 	Status     string        `json:"status"`
-	Weight     float64       `json:"weight"` // вес голоса; 0, пока не подтверждена
+	OwnerName  string        `json:"owner_name,omitempty"` // кем человек подтверждён по реестру
+	Weight     float64       `json:"weight"`               // вес голоса; 0, пока не подтверждена
 	Choice     domain.Choice `json:"choice,omitempty"`
 	VotedAt    *time.Time    `json:"voted_at,omitempty"`
 	CreatedAt  time.Time     `json:"created_at"`
@@ -54,8 +65,9 @@ type RegistryOwner struct {
 // PendingClaim — заявка в очереди инициатора: кто пришёл и кто есть в реестре.
 type PendingClaim struct {
 	Claim
-	UserName string          `json:"user_name"` // имя в MAX
-	Owners   []RegistryOwner `json:"owners"`
+	UserName    string          `json:"user_name"`              // имя в MAX
+	ConfirmedAs string          `json:"confirmed_as,omitempty"` // уже подтверждён под этим ФИО по другой квартире
+	Owners      []RegistryOwner `json:"owners"`
 }
 
 // ClaimFlat — человек говорит «это моя квартира». Повторная заявка
@@ -171,20 +183,74 @@ func claimTx(ctx context.Context, tx pgx.Tx, meetingID int, flatNumber string, u
 	return claimID, fresh, err
 }
 
-// CancelClaim — «это не моя квартира»: человек сам отзывает неразобранную заявку.
+// CancelClaim — «это не моя квартира». Неразобранную заявку отзывает любой.
+// Подтверждённую — только инициатор свою: её подтвердил он сам, и без
+// отмены ошибка в первом выборе закрепила бы за ним чужое ФИО навсегда.
+// Его голос по этой доле уходит из подсчёта, собственник освобождается.
 func (s *Store) CancelClaim(ctx context.Context, meetingID, claimID int, maxID int64) error {
-	tag, err := s.pool.Exec(ctx, `
-		DELETE FROM claims c USING users u
-		WHERE c.id = $2 AND c.voting_id = $1 AND c.user_id = u.id AND u.max_id = $3
-		  AND c.status = 'pending'`,
-		meetingID, claimID, maxID)
-	if err != nil {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var (
+			status      string
+			ownerID     *int
+			isInitiator bool
+		)
+		err := tx.QueryRow(ctx, `
+			SELECT c.status, c.owner_id, v.initiator_user_id = c.user_id
+			FROM claims c
+			JOIN users u ON u.id = c.user_id
+			JOIN votings v ON v.id = c.voting_id
+			WHERE c.id = $2 AND c.voting_id = $1 AND u.max_id = $3
+			FOR UPDATE OF c`, meetingID, claimID, maxID).Scan(&status, &ownerID, &isInitiator)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case status == ClaimPending:
+		case status == ClaimConfirmed && isInitiator && ownerID != nil:
+			if err := acceptingVotes(ctx, tx, meetingID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx,
+				`DELETE FROM votes WHERE voting_id = $1 AND owner_id = $2`, meetingID, *ownerID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE owners SET user_id = NULL, status = 'unclaimed', claimed_at = NULL, confirmed_at = NULL
+				WHERE id = $1`, *ownerID); err != nil {
+				return err
+			}
+		default:
+			return ErrNotFound
+		}
+
+		_, err = tx.Exec(ctx, `DELETE FROM claims WHERE id = $1`, claimID)
 		return err
+	})
+}
+
+// SamePerson — одно ли это ФИО. Сравниваем без регистра, лишних пробелов
+// и разницы «е/ё»: реестр набирают вручную, а человек при этом один.
+func SamePerson(a, b string) bool {
+	normalize := func(name string) string {
+		name = strings.ToLower(strings.Join(strings.Fields(name), " "))
+		return strings.ReplaceAll(name, "ё", "е")
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return normalize(a) == normalize(b)
+}
+
+// PendingVotes — сколько голосов ждут проверки заявок. В подсчёт они не
+// идут, но инициатору важно видеть, что люди уже проголосовали.
+func (s *Store) PendingVotes(ctx context.Context, meetingID int) (count int, area float64, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(sum(f.area), 0)
+		FROM claims c JOIN flats f ON f.id = c.flat_id
+		WHERE c.voting_id = $1 AND c.status = 'pending' AND c.choice IS NOT NULL`,
+		meetingID).Scan(&count, &area)
+	return count, area, err
 }
 
 // HasClaim — подавал ли человек заявку в это собрание, в любом статусе.
@@ -209,7 +275,7 @@ func (s *Store) UserClaims(ctx context.Context, meetingID int, maxID int64) ([]C
 
 func (s *Store) claims(ctx context.Context, where string, args ...any) ([]Claim, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, f.id, f.number, f.area, c.status,
+		SELECT c.id, f.id, f.number, f.area, c.status, COALESCE(o.full_name, o.org_name, ''),
 		       COALESCE(o.owned_area, 0), COALESCE(c.choice, ''), c.voted_at, c.created_at
 		FROM claims c
 		JOIN flats f ON f.id = c.flat_id
@@ -224,7 +290,7 @@ func (s *Store) claims(ctx context.Context, where string, args ...any) ([]Claim,
 
 func scanClaim(row pgx.CollectableRow) (Claim, error) {
 	var c Claim
-	err := row.Scan(&c.ID, &c.FlatID, &c.FlatNumber, &c.FlatArea, &c.Status,
+	err := row.Scan(&c.ID, &c.FlatID, &c.FlatNumber, &c.FlatArea, &c.Status, &c.OwnerName,
 		&c.Weight, &c.Choice, &c.VotedAt, &c.CreatedAt)
 	return c, err
 }
@@ -235,9 +301,15 @@ func (s *Store) PendingClaims(ctx context.Context, meetingID int) ([]PendingClai
 	rows, err := s.pool.Query(ctx, `
 		-- Ответ собственника инициатору не показываем: подтверждение
 		-- не должно зависеть от того, «за» человек или «против».
-		SELECT c.id, f.id, f.number, f.area, c.status, 0::numeric, '',
+		SELECT c.id, f.id, f.number, f.area, c.status, '', 0::numeric, '',
 		       NULL::timestamptz, c.created_at,
-		       COALESCE(NULLIF(u.full_name, ''), u.username, 'id ' || u.max_id)
+		       COALESCE(NULLIF(u.full_name, ''), u.username, 'id ' || u.max_id),
+		       COALESCE((
+		           SELECT COALESCE(o.full_name, o.org_name, '')
+		           FROM claims mine JOIN owners o ON o.id = mine.owner_id
+		           WHERE mine.voting_id = c.voting_id AND mine.user_id = c.user_id AND mine.status = 'confirmed'
+		           ORDER BY mine.decided_at LIMIT 1
+		       ), '')
 		FROM claims c
 		JOIN flats f ON f.id = c.flat_id
 		JOIN users u ON u.id = c.user_id
@@ -248,8 +320,8 @@ func (s *Store) PendingClaims(ctx context.Context, meetingID int) ([]PendingClai
 	}
 	pending, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (PendingClaim, error) {
 		var p PendingClaim
-		err := row.Scan(&p.ID, &p.FlatID, &p.FlatNumber, &p.FlatArea, &p.Status, &p.Weight,
-			&p.Choice, &p.VotedAt, &p.CreatedAt, &p.UserName)
+		err := row.Scan(&p.ID, &p.FlatID, &p.FlatNumber, &p.FlatArea, &p.Status, &p.OwnerName, &p.Weight,
+			&p.Choice, &p.VotedAt, &p.CreatedAt, &p.UserName, &p.ConfirmedAs)
 		return p, err
 	})
 	if err != nil || len(pending) == 0 {
@@ -355,6 +427,26 @@ func confirmTx(ctx context.Context, tx pgx.Tx, meetingID, claimID, ownerID int) 
 	}
 	if taken {
 		return ErrOwnerTaken
+	}
+
+	// Первая подтверждённая доля закрепляет, кто этот человек по реестру.
+	// Дальше за ним подтверждаются только доли того же собственника.
+	var ownerName string
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(full_name, org_name, '') FROM owners WHERE id = $1`, ownerID).Scan(&ownerName); err != nil {
+		return err
+	}
+	var confirmedAs string
+	err = tx.QueryRow(ctx, `
+		SELECT COALESCE(o.full_name, o.org_name, '')
+		FROM claims c JOIN owners o ON o.id = c.owner_id
+		WHERE c.voting_id = $1 AND c.user_id = $2 AND c.status = 'confirmed'
+		ORDER BY c.decided_at LIMIT 1`, meetingID, userID).Scan(&confirmedAs)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if confirmedAs != "" && !SamePerson(confirmedAs, ownerName) {
+		return ErrOtherPerson{ConfirmedAs: confirmedAs}
 	}
 
 	if _, err := tx.Exec(ctx, `

@@ -385,3 +385,108 @@ func TestInitiatorOwnFlat(t *testing.T) {
 		t.Errorf("занятый собственник: %v", err)
 	}
 }
+
+// Один аккаунт — один человек из реестра: квартир может быть несколько,
+// но во всех подтверждённых долях ФИО одно.
+func TestOnePersonPerAccount(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+
+	owner := func(name, area string) registry.Owner {
+		return registry.Owner{Kind: "person", Name: name, OwnedArea: area, Share: "1"}
+	}
+	meeting := newMeeting(t, db, 10)
+	err := db.ImportRegistry(ctx, meeting.ID, []registry.Flat{
+		{Number: "1", Area: "60", Owners: []registry.Owner{owner("Семёнов Иван", "60")}},
+		{Number: "2", Area: "40", Owners: []registry.Owner{owner("семенов  иван", "40")}}, // тот же человек, набран иначе
+		{Number: "3", Area: "50", Owners: []registry.Owner{owner("Петров Пётр", "50")}},
+		{Number: "4", Area: "80", Owners: []registry.Owner{owner("Петров Пётр", "40"), owner("Сидорова Анна", "40")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Publish(ctx, meeting.ID); err != nil {
+		t.Fatal(err)
+	}
+	ownerID := func(flat, name string) int {
+		owners, _ := db.FlatOwners(ctx, meeting.ID, flat)
+		for _, o := range owners {
+			if o.Name == name {
+				return o.ID
+			}
+		}
+		t.Fatalf("нет собственника %s в кв. %s", name, flat)
+		return 0
+	}
+
+	// Инициатор: первая доля закрепляет ФИО.
+	initiator := User{MaxID: 10}
+	first, err := db.ClaimOwnFlat(ctx, meeting.ID, "1", initiator, ownerID("1", "Семёнов Иван"))
+	if err != nil || first.OwnerName != "Семёнов Иван" {
+		t.Fatalf("первая квартира: %+v, %v", first, err)
+	}
+	var other ErrOtherPerson
+	if _, err := db.ClaimOwnFlat(ctx, meeting.ID, "3", initiator, ownerID("3", "Петров Пётр")); !errors.As(err, &other) || other.ConfirmedAs != "Семёнов Иван" {
+		t.Errorf("чужое ФИО у инициатора: %v", err)
+	}
+	if _, err := db.ClaimOwnFlat(ctx, meeting.ID, "2", initiator, ownerID("2", "семенов  иван")); err != nil {
+		t.Errorf("то же ФИО, набранное иначе: %v", err)
+	}
+
+	// То же правило, когда инициатор подтверждает соседа.
+	neighbour := User{MaxID: 20}
+	c3, _, _ := db.ClaimFlat(ctx, meeting.ID, "3", neighbour)
+	c4, _, _ := db.ClaimFlat(ctx, meeting.ID, "4", neighbour)
+	if err := db.ConfirmClaim(ctx, meeting.ID, c3.ID, ownerID("3", "Петров Пётр")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ConfirmClaim(ctx, meeting.ID, c4.ID, ownerID("4", "Сидорова Анна")); !errors.As(err, &other) {
+		t.Errorf("соседу подтвердили чужое ФИО: %v", err)
+	}
+	pending, _ := db.PendingClaims(ctx, meeting.ID)
+	if len(pending) != 1 || pending[0].ConfirmedAs != "Петров Пётр" {
+		t.Errorf("очередь не знает, кем уже подтверждён сосед: %+v", pending)
+	}
+	if err := db.ConfirmClaim(ctx, meeting.ID, c4.ID, ownerID("4", "Петров Пётр")); err != nil {
+		t.Errorf("та же персона во второй квартире: %v", err)
+	}
+
+	// Голос по неподтверждённой заявке виден, но не считается.
+	late := User{MaxID: 30}
+	if _, _, err := db.ClaimFlat(ctx, meeting.ID, "4", late); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Vote(ctx, meeting.ID, late.MaxID, domain.ChoiceFor); err != nil {
+		t.Fatal(err)
+	}
+	if count, area, _ := db.PendingVotes(ctx, meeting.ID); count != 1 || area != 80 {
+		t.Errorf("ждут проверки: %d голосов, %v м² — хотели 1 и 80", count, area)
+	}
+
+	// Инициатор отменяет свою ошибочную долю: голос уходит, собственник свободен.
+	if err := db.Vote(ctx, meeting.ID, initiator.MaxID, domain.ChoiceFor); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CancelClaim(ctx, meeting.ID, first.ID, initiator.MaxID); err != nil {
+		t.Fatal(err)
+	}
+	if result, _ := db.Result(ctx, meeting.ID); result.Tally.For != 40 {
+		t.Errorf("после отмены «за» %v м², хотели 40 (только кв. 2)", result.Tally.For)
+	}
+	if owners, _ := db.FlatOwners(ctx, meeting.ID, "1"); owners[0].Taken {
+		t.Error("собственник кв. 1 не освободился")
+	}
+	// Сосед подтверждённую заявку сам не отменит — её подтверждал инициатор.
+	if err := db.CancelClaim(ctx, meeting.ID, c3.ID, neighbour.MaxID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("сосед отменил подтверждённую заявку: %v", err)
+	}
+}
+
+func TestSamePerson(t *testing.T) {
+	if !SamePerson("Семёнов  Иван Иванович ", "семенов иван иванович") {
+		t.Error("регистр, пробелы и ё не должны различать людей")
+	}
+	if SamePerson("Семёнов Иван", "Семёнова Ирина") {
+		t.Error("разные люди совпали")
+	}
+}
