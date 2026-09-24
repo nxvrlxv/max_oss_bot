@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useRef } from 'react';
 
 // Экраны приложения. Навигация — стек в памяти: мини-приложение живёт
 // в одном окне MAX, адресная строка пользователю не видна.
@@ -24,6 +24,8 @@ export interface Nav {
   showError(message: string): void;
   /** Нейтральное всплывающее сообщение: «Ссылка скопирована». */
   showNotice(message: string): void;
+  /** Панель диагностики запуска: что пришло от MAX. */
+  openDiagnostics(): void;
 }
 
 export const NavContext = createContext<Nav | null>(null);
@@ -32,6 +34,20 @@ export function useNav(): Nav {
   const nav = useContext(NavContext);
   if (!nav) throw new Error('useNav вне NavContext');
   return nav;
+}
+
+/** Пять быстрых нажатий — открыть диагностику. Вешается на заголовки. */
+export function useSecretTaps(): () => void {
+  const nav = useNav();
+  const taps = useRef<number[]>([]);
+  return () => {
+    const now = Date.now();
+    taps.current = [...taps.current.filter((t) => now - t < 2000), now];
+    if (taps.current.length >= 5) {
+      taps.current = [];
+      nav.openDiagnostics();
+    }
+  };
 }
 
 /** Разбирает нагрузку запуска: «join_<токен>», «open_42», «claims_42», «new», «list». */

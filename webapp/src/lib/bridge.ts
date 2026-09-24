@@ -11,6 +11,8 @@ interface MaxWebApp {
     user?: { id: number; first_name?: string; last_name?: string };
   };
   platform?: string;
+  version?: string;
+  getLaunchContext?(): Promise<unknown>;
   BackButton?: {
     show(): void;
     hide(): void;
@@ -43,12 +45,60 @@ export function initData(): string {
   return app()?.initData ?? '';
 }
 
-/** Нагрузка кнопки или ссылки, с которой открыли приложение: «open_42», «new». */
+/**
+ * Нагрузка кнопки или ссылки, с которой открыли приложение: «join_<токен>», «open_42».
+ *
+ * Сначала читаем адрес страницы: MAX кладёт туда #WebAppData=…&…, и при
+ * повторном открытии уже запущенного приложения адрес меняется, а Bridge
+ * свои данные не перечитывает — он разбирает их один раз при загрузке.
+ */
 export function startParam(): string {
-  const fromBridge = app()?.initDataUnsafe?.start_param;
-  if (fromBridge) return fromBridge;
-  // Для разработки в браузере: http://localhost:5173/?start=open_1
-  return new URLSearchParams(window.location.search).get('start') ?? '';
+  return hashStartParam() ?? app()?.initDataUnsafe?.start_param
+    // Для разработки в браузере: http://localhost:5173/?start=open_1
+    ?? new URLSearchParams(window.location.search).get('start') ?? '';
+}
+
+/** start_param из #WebAppData в адресе — так же, как его ищет Bridge. */
+export function hashStartParam(): string | null {
+  try {
+    const data = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('WebAppData');
+    if (!data) return null;
+    return new URLSearchParams(data).get('start_param')
+      ?? new URLSearchParams(decodeURIComponent(data)).get('start_param');
+  } catch {
+    return null;
+  }
+}
+
+/** Сырые данные для панели диагностики. Подпись initData сюда не попадает. */
+export async function launchInfo(): Promise<Record<string, string>> {
+  const webApp = app();
+  const hashKeys = [...new URLSearchParams(window.location.hash.replace(/^#/, '')).keys()];
+  const initKeys = webApp?.initData ? [...new URLSearchParams(webApp.initData).keys()] : [];
+
+  let entryPoint = 'нет метода';
+  if (webApp?.getLaunchContext) {
+    entryPoint = await Promise.race([
+      webApp.getLaunchContext().then((ctx) => JSON.stringify(ctx)).catch((err) => `ошибка: ${String(err)}`),
+      new Promise<string>((resolve) => setTimeout(() => resolve('нет ответа за 2 с'), 2000)),
+    ]);
+  }
+
+  return {
+    'Bridge подключён': webApp ? 'да' : 'нет',
+    'Открыто в MAX (есть initData)': insideMax() ? 'да' : 'нет',
+    'Платформа': webApp?.platform ?? '—',
+    'Версия MAX': webApp?.version ?? '—',
+    'start_param от Bridge': webApp?.initDataUnsafe?.start_param ?? '—',
+    'start_param из адреса': hashStartParam() ?? '—',
+    'Итоговый start_param': startParam() || '—',
+    'Пользователь': String(webApp?.initDataUnsafe?.user?.id ?? '—'),
+    'Поля initData': initKeys.join(', ') || '—',
+    'Поля в адресе (#)': hashKeys.join(', ') || '—',
+    'Контекст запуска': entryPoint,
+    'Страница загружена': new Date(performance.timeOrigin).toLocaleTimeString('ru-RU'),
+    'Адрес без #': window.location.origin + window.location.pathname + window.location.search,
+  };
 }
 
 /** Открыто внутри MAX — есть нативная кнопка «Назад». */

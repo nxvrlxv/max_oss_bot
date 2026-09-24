@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { api } from '../../api/client';
-import type { Meeting, Threshold } from '../../api/types';
+import { choiceLabels, type Meeting, type Threshold } from '../../api/types';
 import { InviteCard } from '../../components/InviteCard';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, shortName } from '../../lib/format';
@@ -84,6 +84,8 @@ export function Dashboard({ id }: { id: number }) {
         </button>
       )}
 
+      <MyVoteCard meeting={meeting} />
+
       {open && meeting.invite_link && (
         <div style={{ marginTop: 12 }}>
           <InviteCard link={meeting.invite_link} question={meeting.question} />
@@ -129,6 +131,38 @@ export function Dashboard({ id }: { id: number }) {
             Проверить заявки · {board.pending_claims}
           </button>
         </BottomBar>
+      )}
+    </div>
+  );
+}
+
+// Инициатор — обычно тоже собственник, и голосует тем же путём, что соседи.
+function MyVoteCard({ meeting }: { meeting: Meeting }) {
+  const nav = useNav();
+  const open = meeting.status === 'active';
+  const hasFlat = meeting.claims.length > 0;
+  if (!open && !meeting.choice) return null;
+
+  const flats = meeting.claims.map((c) => `кв. ${c.flat_number}`).join(', ');
+
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div className="card-top">
+        <div className="strong">Ваш голос</div>
+        {meeting.choice
+          ? <Badge tone="green">{choiceLabels[meeting.choice]}</Badge>
+          : hasFlat && <Badge tone="blue">Не отдан</Badge>}
+      </div>
+      <div className="caption" style={{ marginTop: 4 }}>
+        {hasFlat
+          ? `${flats}${meeting.voted_at ? ` · ${dayTime(meeting.voted_at)}` : ''}`
+          : 'Если вы собственник в этом доме, выберите свою квартиру и проголосуйте'}
+      </div>
+      {open && (
+        <button type="button" className={`btn ${meeting.choice ? 'secondary' : 'primary'}`}
+          onClick={() => nav.go(hasFlat ? { name: 'vote', id: meeting.id } : { name: 'pick', id: meeting.id })}>
+          {!hasFlat ? 'Выбрать квартиру' : meeting.choice ? 'Изменить ответ' : 'Проголосовать'}
+        </button>
       )}
     </div>
   );

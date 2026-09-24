@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { ApiError } from '../api/client';
+import { useSecretTaps } from '../lib/nav';
 
 /** Загрузка данных экрана: состояние, ошибка и перезапрос. */
 export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
@@ -36,9 +37,11 @@ export function Loading() {
 }
 
 export function Failure({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  // Экран ошибки — тоже вход в диагностику: именно здесь она нужнее всего.
+  const tap = useSecretTaps();
   return (
     <div className="center">
-      <p className="title">{message}</p>
+      <p className="title" onClick={tap}>{message}</p>
       {onRetry && <button type="button" className="btn secondary" style={{ maxWidth: 240 }} onClick={onRetry}>Повторить</button>}
     </div>
   );

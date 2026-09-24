@@ -1,6 +1,6 @@
 import { initData } from '../lib/bridge';
 import type {
-  Claim, Dashboard, Flat, Me, Meeting, MeetingInput, PendingClaim, RegistryReport, Choice,
+  Claim, Dashboard, Flat, Me, Meeting, MeetingInput, PendingClaim, RegistryOwner, RegistryReport, Choice,
 } from './types';
 
 /** Ошибка API: текст уже по-русски, его можно показать как есть. */
@@ -53,8 +53,11 @@ export const api = {
   join: (token: string) => request<{ id: number }>('GET', `/join/${token}`),
   meeting: (id: number) => request<Meeting>('GET', `/meetings/${id}`),
   flats: (id: number) => request<Flat[]>('GET', `/meetings/${id}/flats`),
-  claim: (id: number, flatNumber: string) =>
-    request<Claim>('POST', `/meetings/${id}/claims`, { flat_number: flatNumber }),
+  /** ownerId — только для инициатора: своя заявка подтверждается сразу. */
+  claim: (id: number, flatNumber: string, ownerId?: number) =>
+    request<Claim>('POST', `/meetings/${id}/claims`, { flat_number: flatNumber, owner_id: ownerId }),
+  flatOwners: (id: number, flatNumber: string) =>
+    request<RegistryOwner[]>('GET', `/meetings/${id}/flats/${encodeURIComponent(flatNumber)}/owners`),
   cancelClaim: (id: number, claimId: number) => request<void>('DELETE', `/meetings/${id}/claims/${claimId}`),
   vote: (id: number, choice: Choice) => request<Meeting>('POST', `/meetings/${id}/vote`, { choice }),
 

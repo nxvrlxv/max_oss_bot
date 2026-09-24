@@ -2,12 +2,14 @@ import { api } from '../../api/client';
 import { choiceLabels, type Meeting } from '../../api/types';
 import { Badge, Chevron, CheckCircle, Failure, Loading, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, day, percent } from '../../lib/format';
-import { useNav } from '../../lib/nav';
+import { useNav, useSecretTaps } from '../../lib/nav';
 
 // Главный экран: собрания, где человек инициатор или подал заявку на квартиру.
 export function Home() {
   const nav = useNav();
   const { data, error, loading, reload } = useLoad(() => api.me(), []);
+  // Пять быстрых нажатий на заголовок — панель диагностики запуска.
+  const tapTitle = useSecretTaps();
 
   if (loading && !data) return <Loading />;
   if (error || !data) return <Failure message={error ?? 'Не удалось загрузить'} onRetry={reload} />;
@@ -18,7 +20,7 @@ export function Home() {
   return (
     <div className="screen">
       <div className="header" style={{ paddingBottom: 12, gap: 4 }}>
-        <h1 className="h1">Голосования</h1>
+        <h1 className="h1" onClick={tapTitle}>Голосования</h1>
         <HomeSubtitle meetings={data.meetings} />
       </div>
 
@@ -115,6 +117,11 @@ function ActiveCard({ meeting }: { meeting: Meeting }) {
               {summary.quorum && <CheckCircle size={16} />}
               Проголосовали {percent(summary.turnout)}, {summary.quorum ? 'кворум набран' : 'кворума пока нет'}
             </div>
+            {meeting.claims.length > 0 && (
+              <div className="card-note caption">
+                Ваш голос: {meeting.choice ? choiceLabels[meeting.choice] : 'не отдан'}
+              </div>
+            )}
           </>
         )}
       </button>
