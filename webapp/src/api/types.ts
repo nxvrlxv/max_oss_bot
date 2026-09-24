@@ -37,6 +37,7 @@ export interface Meeting {
   entrances_count: number;
   is_initiator: boolean;
   chat_bound: boolean;
+  invite_link?: string;
   claims: Claim[];
   choice?: Choice;
   voted_at?: string;

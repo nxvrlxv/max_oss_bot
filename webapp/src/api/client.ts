@@ -10,8 +10,19 @@ export class ApiError extends Error {
   }
 }
 
+// Токены приглашений по номеру собрания. Посторонний видит собрание,
+// только пока несёт токен; после заявки он участник, и токен уже не нужен.
+const invites = new Map<number, string>();
+
+export function rememberInvite(meetingId: number, token: string) {
+  invites.set(meetingId, token);
+}
+
 async function request<T>(method: string, path: string, body?: unknown, contentType = 'application/json'): Promise<T> {
   const headers: Record<string, string> = { 'X-Max-Init-Data': initData() };
+  const meetingId = Number(path.match(/^\/meetings\/(\d+)/)?.[1]);
+  const invite = invites.get(meetingId);
+  if (invite) headers['X-Invite-Token'] = invite;
   let payload: BodyInit | undefined;
   if (body instanceof Blob) {
     headers['Content-Type'] = contentType;
@@ -39,6 +50,7 @@ async function request<T>(method: string, path: string, body?: unknown, contentT
 
 export const api = {
   me: () => request<Me>('GET', '/me'),
+  join: (token: string) => request<{ id: number }>('GET', `/join/${token}`),
   meeting: (id: number) => request<Meeting>('GET', `/meetings/${id}`),
   flats: (id: number) => request<Flat[]>('GET', `/meetings/${id}/flats`),
   claim: (id: number, flatNumber: string) =>

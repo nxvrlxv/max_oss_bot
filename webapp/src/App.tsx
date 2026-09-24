@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { haptic, insideMax, setNativeBack, startParam } from './lib/bridge';
 import { NavContext, routeFromStart, type Nav, type Route } from './lib/nav';
 import { Home } from './screens/owner/Home';
+import { Join } from './screens/owner/Join';
 import { Open } from './screens/owner/Open';
 import { PickFlat } from './screens/owner/PickFlat';
 import { Vote } from './screens/owner/Vote';
@@ -38,6 +39,11 @@ export function App() {
       window.clearTimeout(errorTimer.current);
       errorTimer.current = window.setTimeout(() => setError(null), 4000);
     },
+    showNotice: (message) => {
+      setError(message);
+      window.clearTimeout(errorTimer.current);
+      errorTimer.current = window.setTimeout(() => setError(null), 2500);
+    },
   }), [back, stack.length]);
 
   // Нативная кнопка «Назад» MAX — на всех экранах, кроме корневого.
@@ -61,6 +67,7 @@ function Screen({ route }: { route: Route }) {
   // key — чтобы при переходе между собраниями состояние экрана не переезжало.
   switch (route.name) {
     case 'home': return <Home />;
+    case 'join': return <Join key={route.token} token={route.token} />;
     case 'open': return <Open key={route.id} id={route.id} />;
     case 'pick': return <PickFlat key={route.id} id={route.id} />;
     case 'vote': return <Vote key={route.id} id={route.id} />;

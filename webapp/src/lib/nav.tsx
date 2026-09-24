@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react';
 // в одном окне MAX, адресная строка пользователю не видна.
 export type Route =
   | { name: 'home' }
+  | { name: 'join'; token: string } // приглашение из ссылки, QR или кнопки в чате дома
   | { name: 'open'; id: number } // решает, куда вести: инициатора — на дашборд, собственника — к голосованию
   | { name: 'pick'; id: number }
   | { name: 'vote'; id: number }
@@ -21,6 +22,8 @@ export interface Nav {
   reset(route: Route): void;
   canGoBack: boolean;
   showError(message: string): void;
+  /** Нейтральное всплывающее сообщение: «Ссылка скопирована». */
+  showNotice(message: string): void;
 }
 
 export const NavContext = createContext<Nav | null>(null);
@@ -31,12 +34,14 @@ export function useNav(): Nav {
   return nav;
 }
 
-/** Разбирает нагрузку запуска: «open_42», «claims_42», «new», «list». */
+/** Разбирает нагрузку запуска: «join_<токен>», «open_42», «claims_42», «new», «list». */
 export function routeFromStart(param: string): Route {
   // «open_42»; двоеточие — старый формат кнопок.
   const [action, rawId] = param.split(/[_:]/);
   const id = Number(rawId);
   switch (action) {
+    case 'join':
+      return /^[0-9a-f]{16,64}$/.test(rawId ?? '') ? { name: 'join', token: rawId } : { name: 'home' };
     case 'open':
       return Number.isInteger(id) && id > 0 ? { name: 'open', id } : { name: 'home' };
     case 'claims':

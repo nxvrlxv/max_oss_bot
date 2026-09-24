@@ -24,6 +24,8 @@ interface MaxWebApp {
   };
   openMaxLink?(url: string): void;
   openLink?(url: string): void;
+  shareMaxContent?(params: { text?: string; link?: string }): Promise<unknown>;
+  shareContent?(params: { text?: string; link?: string }): Promise<unknown>;
 }
 
 declare global {
@@ -73,3 +75,32 @@ export const haptic = {
   select: () => app()?.HapticFeedback?.selectionChanged(),
   tap: () => app()?.HapticFeedback?.impactOccurred('light'),
 };
+
+export type ShareResult = 'shared' | 'copied' | 'failed';
+
+/**
+ * Делится ссылкой: сначала выбор чата внутри MAX, затем системное меню
+ * «Поделиться», в обычном браузере — копирование в буфер обмена.
+ */
+export async function shareLink(link: string, text: string): Promise<ShareResult> {
+  const webApp = app();
+  for (const share of [webApp?.shareMaxContent, webApp?.shareContent]) {
+    if (!share || !insideMax()) continue;
+    try {
+      await share.call(webApp, { text, link });
+      return 'shared';
+    } catch {
+      // пользователь закрыл окно или метод не поддержан клиентом — пробуем следующий способ
+    }
+  }
+  return copyText(link);
+}
+
+export async function copyText(value: string): Promise<ShareResult> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return 'copied';
+  } catch {
+    return 'failed';
+  }
+}

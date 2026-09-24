@@ -3,7 +3,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { api, ApiError } from '../../api/client';
 import { choiceLabels, type Choice, type Meeting } from '../../api/types';
 import { BottomBar, CheckCircle, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
-import { haptic } from '../../lib/bridge';
+import { haptic, shareLink } from '../../lib/bridge';
 import { area, dayTime } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
@@ -140,6 +140,16 @@ export function Vote({ id }: { id: number }) {
       {open && !picked && (
         <button type="button" className="btn link" style={{ marginTop: 8 }} onClick={() => nav.go({ name: 'pick', id })}>
           У меня ещё одна квартира в этом доме
+        </button>
+      )}
+
+      {open && !picked && meeting.invite_link && (
+        <button type="button" className="btn link" onClick={async () => {
+          const result = await shareLink(meeting.invite_link!, `Голосование собственников: «${meeting.question}»`);
+          if (result === 'copied') nav.showNotice('Ссылка скопирована — отправьте её соседу');
+          if (result === 'failed') nav.showError('Не удалось поделиться ссылкой');
+        }}>
+          Позвать соседа
         </button>
       )}
 

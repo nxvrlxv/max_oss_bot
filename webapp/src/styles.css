@@ -334,3 +334,10 @@ textarea.input { resize: vertical; min-height: 96px; }
 }
 
 .btn-row .btn { margin-top: 0; }
+
+.invite-link {
+  margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+  background: var(--background-tertiary);
+  font-size: 14px; line-height: 18px; word-break: break-all;
+  user-select: all; -webkit-user-select: all;
+}

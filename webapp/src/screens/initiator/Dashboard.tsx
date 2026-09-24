@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { api } from '../../api/client';
 import type { Meeting, Threshold } from '../../api/types';
+import { InviteCard } from '../../components/InviteCard';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
@@ -81,6 +82,12 @@ export function Dashboard({ id }: { id: number }) {
             Голоса по ним сохранены, но не считаются, пока вы не сверите собственников с реестром
           </div>
         </button>
+      )}
+
+      {open && meeting.invite_link && (
+        <div style={{ marginTop: 12 }}>
+          <InviteCard link={meeting.invite_link} question={meeting.question} />
+        </div>
       )}
 
       {notVoted.length > 0 && (
