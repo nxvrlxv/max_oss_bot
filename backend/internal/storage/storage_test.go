@@ -158,6 +158,14 @@ func TestBindChat(t *testing.T) {
 	if _, err := db.Meeting(ctx, 12345); !errors.Is(err, ErrNotFound) {
 		t.Errorf("несуществующее собрание: %v", err)
 	}
+
+	byToken, err := db.MeetingByToken(ctx, first.InviteToken)
+	if err != nil || byToken.ID != first.ID || len(first.InviteToken) != 32 {
+		t.Errorf("поиск по токену %q: %+v, %v", first.InviteToken, byToken, err)
+	}
+	if _, err := db.MeetingByToken(ctx, "0123456789abcdef0123456789abcdef"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("чужой токен: %v", err)
+	}
 }
 
 func TestVotingFlow(t *testing.T) {
@@ -215,9 +223,15 @@ func TestVotingFlow(t *testing.T) {
 		t.Errorf("голос без заявки: %v", err)
 	}
 
+	if has, _ := db.HasClaim(ctx, meeting.ID, voter.MaxID); has {
+		t.Error("заявки ещё нет, а HasClaim говорит, что есть")
+	}
 	claim, fresh, err := db.ClaimFlat(ctx, meeting.ID, flatNumber(owner.UnitID), voter)
 	if err != nil || !fresh {
 		t.Fatal(fresh, err)
+	}
+	if has, _ := db.HasClaim(ctx, meeting.ID, voter.MaxID); !has {
+		t.Error("заявка подана, а HasClaim её не видит")
 	}
 	again, fresh, err := db.ClaimFlat(ctx, meeting.ID, flatNumber(owner.UnitID), voter)
 	if err != nil || again.ID != claim.ID || fresh {

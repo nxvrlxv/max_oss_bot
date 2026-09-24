@@ -26,6 +26,7 @@ type Store interface {
 	BindChat(ctx context.Context, meetingID int, chatID, initiatorMaxID int64) error
 	UnbindChat(ctx context.Context, chatID int64) error
 	Meeting(ctx context.Context, meetingID int) (Meeting, error)
+	MeetingByToken(ctx context.Context, token string) (Meeting, error)
 	MeetingsByInitiator(ctx context.Context, maxID int64) ([]Meeting, error)
 	MeetingsByChat(ctx context.Context, chatID int64) ([]Meeting, error)
 	Result(ctx context.Context, meetingID int) (domain.Result, error)
@@ -102,6 +103,17 @@ func (s *MemoryStore) Meeting(_ context.Context, meetingID int) (Meeting, error)
 		return Meeting{}, storage.ErrNotFound
 	}
 	return meeting, nil
+}
+
+func (s *MemoryStore) MeetingByToken(_ context.Context, token string) (Meeting, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, meeting := range s.meetings {
+		if meeting.InviteToken != "" && meeting.InviteToken == token {
+			return meeting, nil
+		}
+	}
+	return Meeting{}, storage.ErrNotFound
 }
 
 func (s *MemoryStore) MeetingsByInitiator(_ context.Context, maxID int64) ([]Meeting, error) {

@@ -141,6 +141,18 @@ func (s *Store) CancelClaim(ctx context.Context, meetingID, claimID int, maxID i
 	return nil
 }
 
+// HasClaim — подавал ли человек заявку в это собрание, в любом статусе.
+// Такому собрание видно и без приглашения: он уже в нём участвует.
+func (s *Store) HasClaim(ctx context.Context, meetingID int, maxID int64) (bool, error) {
+	var found bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM claims c JOIN users u ON u.id = c.user_id
+			WHERE c.voting_id = $1 AND u.max_id = $2
+		)`, meetingID, maxID).Scan(&found)
+	return found, err
+}
+
 // UserClaims — заявки человека в собрании, кроме отклонённых.
 func (s *Store) UserClaims(ctx context.Context, meetingID int, maxID int64) ([]Claim, error) {
 	return s.claims(ctx, `

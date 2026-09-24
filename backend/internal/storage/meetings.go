@@ -148,6 +148,15 @@ func (s *Store) Meeting(ctx context.Context, meetingID int) (Meeting, error) {
 	return m, err
 }
 
+// MeetingByToken — собрание по токену приглашения из ссылки или QR, иначе ErrNotFound.
+func (s *Store) MeetingByToken(ctx context.Context, token string) (Meeting, error) {
+	m, err := scanMeeting(s.pool.QueryRow(ctx, meetingSelect+` WHERE v.invite_token = $1`, token))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Meeting{}, ErrNotFound
+	}
+	return m, err
+}
+
 // MeetingsByInitiator — последние собрания пользователя, новые сверху.
 // Лимит — под клавиатуру бота: больше десятка кнопок не читается.
 func (s *Store) MeetingsByInitiator(ctx context.Context, maxID int64) ([]Meeting, error) {

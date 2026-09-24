@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Server) claimFlat(w http.ResponseWriter, r *http.Request) {
-	meeting, ok := s.loadMeeting(w, r)
+	meeting, ok := s.visibleMeeting(w, r)
 	if !ok {
 		return
 	}

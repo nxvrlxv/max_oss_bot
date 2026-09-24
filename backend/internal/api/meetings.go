@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"oss-max/internal/bot"
 	"oss-max/internal/domain"
 	"oss-max/internal/registry"
 	"oss-max/internal/storage"
@@ -74,6 +75,7 @@ type meetingView struct {
 	EntrancesCount int             `json:"entrances_count"`
 	IsInitiator    bool            `json:"is_initiator"`
 	ChatBound      bool            `json:"chat_bound"`
+	InviteLink     string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
 	Claims         []storage.Claim `json:"claims"`
 	Choice         domain.Choice   `json:"choice,omitempty"`
 	VotedAt        *time.Time      `json:"voted_at,omitempty"`
@@ -104,6 +106,10 @@ func (s *Server) view(r *http.Request, meeting storage.Meeting, withRegistry boo
 	}
 	if view.IsInitiator {
 		view.ChatBound = meeting.ChatID != 0
+	}
+	// Ссылку видит каждый, кто видит собрание: позвать соседа может и собственник.
+	if view.Status == storage.MeetingActive && s.cfg.BotName != "" {
+		view.InviteLink = bot.InviteLink(s.cfg.BotName, meeting.InviteToken)
 	}
 
 	claims, err := s.store.UserClaims(ctx, meeting.ID, user.ID)
@@ -148,6 +154,21 @@ func (s *Server) view(r *http.Request, meeting storage.Meeting, withRegistry boo
 	return view, nil
 }
 
+// join — вход по приглашению: токен из ссылки, QR или кнопки в чате
+// превращается в номер собрания. Черновик по приглашению не открывается.
+func (s *Server) join(w http.ResponseWriter, r *http.Request) {
+	meeting, err := s.store.MeetingByToken(r.Context(), r.PathValue("token"))
+	if err != nil || meeting.Status == storage.MeetingDraft {
+		if err != nil && !errors.Is(err, storage.ErrNotFound) {
+			serverError(w, r, err)
+			return
+		}
+		writeError(w, http.StatusNotFound, "Приглашение недействительно — попросите у инициатора новую ссылку")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"id": meeting.ID})
+}
+
 // me — главный экран: кто я и мои собрания.
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
@@ -175,13 +196,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) meeting(w http.ResponseWriter, r *http.Request) {
-	meeting, ok := s.loadMeeting(w, r)
+	meeting, ok := s.visibleMeeting(w, r)
 	if !ok {
-		return
-	}
-	// Черновик видит только инициатор: вопрос ещё может поменяться.
-	if meeting.Status == storage.MeetingDraft && meeting.InitiatorID != currentUser(r).ID {
-		writeError(w, http.StatusNotFound, "Собрание ещё не опубликовано")
 		return
 	}
 	view, err := s.view(r, meeting, true)
@@ -356,12 +372,8 @@ func (s *Server) finish(w http.ResponseWriter, r *http.Request) {
 
 // flats — номера помещений для выбора своей квартиры. ФИО здесь нет.
 func (s *Server) flats(w http.ResponseWriter, r *http.Request) {
-	meeting, ok := s.loadMeeting(w, r)
+	meeting, ok := s.visibleMeeting(w, r)
 	if !ok {
-		return
-	}
-	if meeting.Status == storage.MeetingDraft && meeting.InitiatorID != currentUser(r).ID {
-		writeError(w, http.StatusNotFound, "Собрание ещё не опубликовано")
 		return
 	}
 	flats, err := s.store.Flats(r.Context(), meeting.ID)

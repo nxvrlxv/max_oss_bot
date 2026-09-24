@@ -50,8 +50,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              cfg.APIAddr,
-		Handler:           api.New(db, bot.NewNotifier(client, info.Username), cfg.BotToken, cfg.DevMaxID).Handler(),
+		Addr: cfg.APIAddr,
+		Handler: api.New(db, bot.NewNotifier(client, info.Username), api.Config{
+			BotToken: cfg.BotToken,
+			BotName:  info.Username,
+			DevMaxID: cfg.DevMaxID,
+		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -23,15 +24,21 @@ type Notifier interface {
 	NotifyClaim(ctx context.Context, meeting storage.Meeting, flatNumber, userName string) error
 }
 
+// Config — то, что серверу нужно знать о боте и окружении.
+type Config struct {
+	BotToken string // проверка подписи initData
+	BotName  string // username бота: из него собирается ссылка-приглашение
+	DevMaxID int64  // пользователь для разработки в браузере без MAX; 0 — выключено
+}
+
 type Server struct {
 	store    *storage.Store
 	notifier Notifier
-	botToken string
-	devMaxID int64 // пользователь для разработки в браузере без MAX; 0 — выключено
+	cfg      Config
 }
 
-func New(store *storage.Store, notifier Notifier, botToken string, devMaxID int64) *Server {
-	return &Server{store: store, notifier: notifier, botToken: botToken, devMaxID: devMaxID}
+func New(store *storage.Store, notifier Notifier, cfg Config) *Server {
+	return &Server{store: store, notifier: notifier, cfg: cfg}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -43,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Собственник
 	mux.HandleFunc("GET /api/me", s.auth(s.me))
+	mux.HandleFunc("GET /api/join/{token}", s.auth(s.join))
 	mux.HandleFunc("GET /api/meetings/{id}", s.auth(s.meeting))
 	mux.HandleFunc("GET /api/meetings/{id}/flats", s.auth(s.flats))
 	mux.HandleFunc("POST /api/meetings/{id}/claims", s.auth(s.claimFlat))
@@ -74,14 +82,14 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		var user InitUser
 		switch {
 		case raw != "":
-			data, err := ValidateInitData(raw, s.botToken, initDataMaxAge, time.Now())
+			data, err := ValidateInitData(raw, s.cfg.BotToken, initDataMaxAge, time.Now())
 			if err != nil {
 				writeError(w, http.StatusUnauthorized, "Откройте приложение заново из MAX")
 				return
 			}
 			user = data.User
-		case s.devMaxID != 0:
-			user = InitUser{ID: s.devMaxID, FirstName: "Разработчик"}
+		case s.cfg.DevMaxID != 0:
+			user = InitUser{ID: s.cfg.DevMaxID, FirstName: "Разработчик"}
 		default:
 			writeError(w, http.StatusUnauthorized, "Откройте приложение из MAX")
 			return
@@ -135,6 +143,43 @@ func (s *Server) loadMeeting(w http.ResponseWriter, r *http.Request) (storage.Me
 	if err != nil {
 		storeError(w, r, err)
 		return storage.Meeting{}, false
+	}
+	return meeting, true
+}
+
+// visibleMeeting загружает собрание и проверяет, что человеку можно его видеть.
+// Номера собраний идут подряд, поэтому одного номера мало: посторонний
+// должен прийти по приглашению — с токеном из ссылки, QR или кнопки в чате.
+// Инициатору и тем, кто уже подал заявку, токен не нужен.
+func (s *Server) visibleMeeting(w http.ResponseWriter, r *http.Request) (storage.Meeting, bool) {
+	meeting, ok := s.loadMeeting(w, r)
+	if !ok {
+		return meeting, false
+	}
+
+	user := currentUser(r)
+	if meeting.InitiatorID == user.ID {
+		return meeting, true
+	}
+	// Черновик видит только инициатор: вопрос ещё может поменяться.
+	if meeting.Status == storage.MeetingDraft {
+		writeError(w, http.StatusNotFound, "Собрание ещё не опубликовано")
+		return meeting, false
+	}
+
+	token := r.Header.Get("X-Invite-Token")
+	if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(meeting.InviteToken)) == 1 {
+		return meeting, true
+	}
+
+	has, err := s.store.HasClaim(r.Context(), meeting.ID, user.ID)
+	if err != nil {
+		serverError(w, r, err)
+		return meeting, false
+	}
+	if !has {
+		writeError(w, http.StatusNotFound, "Собрание не найдено. Откройте его по ссылке или кнопке из чата дома")
+		return meeting, false
 	}
 	return meeting, true
 }

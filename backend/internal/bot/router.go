@@ -52,20 +52,34 @@ func (b *Bot) onBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) e
 	}
 
 	payload, ok := Parse(upd.Payload)
-	if !ok || payload.Action != ActionOpen {
+	if !ok {
 		return b.sendMainMenu(ctx, upd.ChatId)
 	}
 
-	meeting, err := b.store.Meeting(ctx, payload.ID)
+	var meeting Meeting
+	var err error
+	switch payload.Action {
+	case ActionJoin: // ссылка-приглашение в формате ?start=join_<токен>
+		meeting, err = b.store.MeetingByToken(ctx, payload.Token)
+	case ActionOpen:
+		meeting, err = b.store.Meeting(ctx, payload.ID)
+	default:
+		return b.sendMainMenu(ctx, upd.ChatId)
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		return b.sendMainMenu(ctx, upd.ChatId)
 	}
 	if err != nil {
-		return fmt.Errorf("собрание %d: %w", payload.ID, err)
+		return fmt.Errorf("собрание по ссылке %q: %w", upd.Payload, err)
+	}
+	// Черновик соседям не показываем: вопрос ещё может поменяться.
+	if meeting.Status == storage.MeetingDraft && meeting.InitiatorID != user.MaxID {
+		return b.sendMainMenu(ctx, upd.ChatId)
 	}
 
+	// Кнопка несёт токен, а не номер: по номеру постороннему собрание не откроется.
 	kb := b.api.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddOpenApp("Проголосовать", b.app, Format(ActionOpen, meeting.ID), 0)
+	kb.AddRow().AddOpenApp("Проголосовать", b.app, FormatJoin(meeting.InviteToken), 0)
 
 	text := fmt.Sprintf("Голосование по вопросу:\n\n%s", meeting.Question)
 

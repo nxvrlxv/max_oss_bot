@@ -35,9 +35,11 @@ func (n *Notifier) AnnounceMeeting(ctx context.Context, meeting Meeting) error {
 	}
 	text.WriteString("\nНажмите «Проголосовать» и выберите свою квартиру. " +
 		"Инициатор сверит заявку с реестром собственников — после этого голос будет учтён.")
+	// Ссылку текстом можно скопировать и переслать тем, кого нет в чате.
+	fmt.Fprintf(&text, "\n\nСсылка для соседей: %s", InviteLink(n.app, meeting.InviteToken))
 
 	kb := n.api.Messages.NewKeyboardBuilder()
-	kb.AddRow().AddOpenApp("Проголосовать", n.app, Format(ActionOpen, meeting.ID), 0)
+	kb.AddRow().AddOpenApp("Проголосовать", n.app, FormatJoin(meeting.InviteToken), 0)
 
 	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetChat(meeting.ChatID).SetText(text.String()).AddKeyboard(kb))
 }
