@@ -44,6 +44,17 @@ func (n *Notifier) AnnounceMeeting(ctx context.Context, meeting Meeting) error {
 	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetChat(meeting.ChatID).SetText(text.String()).AddKeyboard(kb))
 }
 
+// AnnounceCancelled сообщает в домовой чат, что голосование удалено:
+// иначе там останется кнопка «Проголосовать», которая ведёт в никуда.
+func (n *Notifier) AnnounceCancelled(ctx context.Context, meeting Meeting) error {
+	if meeting.ChatID == 0 {
+		return nil
+	}
+	text := fmt.Sprintf("Голосование «%s» отменено инициатором. Голоса, отданные по нему, не учитываются.",
+		strings.TrimSpace(meeting.Question))
+	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetChat(meeting.ChatID).SetText(text))
+}
+
 // NotifyClaim сообщает инициатору о новой заявке. Бот может написать ему,
 // только если инициатор хоть раз запускал бота, — ошибку вызывающий логирует и идёт дальше.
 func (n *Notifier) NotifyClaim(ctx context.Context, meeting Meeting, flatNumber, userName string) error {

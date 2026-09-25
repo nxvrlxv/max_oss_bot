@@ -357,6 +357,24 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	s.respondMeeting(w, r, meeting.ID, http.StatusOK)
 }
 
+// deleteMeeting удаляет собрание со всеми голосами. Если голосование шло
+// и к дому привязан чат, туда уходит сообщение об отмене: собрание
+// берём из middleware до удаления — после него узнать статус и чат уже негде.
+func (s *Server) deleteMeeting(w http.ResponseWriter, r *http.Request) {
+	meeting := meetingFrom(r)
+	if err := s.store.DeleteMeeting(r.Context(), meeting.ID, currentUser(r).ID); err != nil {
+		storeError(w, r, err)
+		return
+	}
+
+	if meeting.Status == storage.MeetingActive {
+		if err := s.notifier.AnnounceCancelled(r.Context(), meeting); err != nil {
+			log.Printf("сообщение об отмене собрания %d в чат %d: %v", meeting.ID, meeting.ChatID, err)
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // setTotalArea — площадь дома вручную; 0 возвращает её к сумме из реестра.
 func (s *Server) setTotalArea(w http.ResponseWriter, r *http.Request) {
 	var in struct {

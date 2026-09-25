@@ -412,6 +412,48 @@ func (s *Store) Finish(ctx context.Context, meetingID int) error {
 	return err
 }
 
+// DeleteMeeting удаляет собрание вместе с реестром, заявками и голосами —
+// всё уходит каскадом от votings. Удалить может только инициатор.
+// Завершённое собрание не удаляется: его итог — основание для протокола.
+// Опустевший дом без привязанного чата удаляется тоже; дом с чатом
+// остаётся — в том же чате будут следующие собрания.
+func (s *Store) DeleteMeeting(ctx context.Context, meetingID int, initiatorMaxID int64) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var (
+			houseID int
+			closed  bool
+		)
+		// Блокируем собрание: пока идёт удаление, в него не проголосуют
+		// и не опубликуют его.
+		err := tx.QueryRow(ctx, `
+			SELECT v.house_id,
+			       v.status = 'finished' OR (v.status = 'active' AND v.ends_at <= now())
+			FROM votings v
+			JOIN users u ON u.id = v.initiator_user_id
+			WHERE v.id = $1 AND u.max_id = $2
+			FOR UPDATE OF v`, meetingID, initiatorMaxID).Scan(&houseID, &closed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound // нет такого или чужое — ответ одинаковый
+		}
+		if err != nil {
+			return err
+		}
+		if closed {
+			return ErrMeetingClosed
+		}
+
+		if _, err := tx.Exec(ctx, `DELETE FROM votings WHERE id = $1`, meetingID); err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `
+			DELETE FROM houses h
+			WHERE h.id = $1 AND h.chat_id IS NULL
+			  AND NOT EXISTS (SELECT 1 FROM votings WHERE house_id = h.id)`, houseID)
+		return err
+	})
+}
+
 func inviteToken() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

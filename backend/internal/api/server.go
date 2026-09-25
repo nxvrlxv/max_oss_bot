@@ -22,6 +22,7 @@ const initDataMaxAge = 24 * time.Hour
 // можно было поднять без токена в тестах.
 type Notifier interface {
 	AnnounceMeeting(ctx context.Context, meeting storage.Meeting) error
+	AnnounceCancelled(ctx context.Context, meeting storage.Meeting) error
 	NotifyClaim(ctx context.Context, meeting storage.Meeting, flatNumber, userName string) error
 }
 
@@ -61,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	// Инициатор
 	mux.HandleFunc("POST /api/meetings", s.auth(s.createMeeting))
 	mux.HandleFunc("PUT /api/meetings/{id}", s.auth(s.initiator(s.updateMeeting)))
+	mux.HandleFunc("DELETE /api/meetings/{id}", s.auth(s.initiator(s.deleteMeeting)))
 	mux.HandleFunc("POST /api/meetings/{id}/registry", s.auth(s.initiator(s.uploadRegistry)))
 	mux.HandleFunc("PUT /api/meetings/{id}/total-area", s.auth(s.initiator(s.setTotalArea)))
 	mux.HandleFunc("POST /api/meetings/{id}/publish", s.auth(s.initiator(s.publish)))
@@ -235,6 +237,8 @@ func storeError(w http.ResponseWriter, r *http.Request, err error) {
 			"». Одним аккаунтом голосует один человек из реестра — другой собственник голосует со своего")
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, "Не найдено")
+	case errors.Is(err, storage.ErrMeetingClosed):
+		writeError(w, http.StatusConflict, "Завершённое голосование удалить нельзя: его итог — основание для протокола")
 	case errors.Is(err, storage.ErrNoRegistry):
 		writeError(w, http.StatusConflict, "Сначала загрузите реестр собственников")
 	case errors.Is(err, storage.ErrNotDraft):

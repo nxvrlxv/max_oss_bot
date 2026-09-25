@@ -20,7 +20,8 @@ import (
 
 type silentNotifier struct{}
 
-func (silentNotifier) AnnounceMeeting(context.Context, storage.Meeting) error { return nil }
+func (silentNotifier) AnnounceMeeting(context.Context, storage.Meeting) error   { return nil }
+func (silentNotifier) AnnounceCancelled(context.Context, storage.Meeting) error { return nil }
 func (silentNotifier) NotifyClaim(context.Context, storage.Meeting, string, string) error {
 	return nil
 }
@@ -284,5 +285,39 @@ func TestTotalAreaFlow(t *testing.T) {
 	initiator.do("POST", lowPath+"/registry", testRegistry)
 	if status, body := initiator.do("POST", lowPath+"/publish", nil); status != http.StatusBadRequest {
 		t.Errorf("публикация с заниженной площадью: %d %v", status, body)
+	}
+}
+
+func TestDeleteMeeting(t *testing.T) {
+	server := testServer(t)
+	initiator := client{t: t, base: server.URL, userID: 10}
+	stranger := client{t: t, base: server.URL, userID: 20}
+	deadline := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+
+	create := func() string {
+		_, m := initiator.do("POST", "/api/meetings", map[string]any{
+			"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft", "ends_at": deadline,
+		})
+		path := fmt.Sprintf("/api/meetings/%d", int(m["id"].(float64)))
+		initiator.do("POST", path+"/registry", testRegistry)
+		initiator.do("POST", path+"/publish", nil)
+		return path
+	}
+
+	active := create()
+	if status, _ := stranger.do("DELETE", active, nil); status != http.StatusNotFound {
+		t.Errorf("удаление чужим: %d, хотели 404", status)
+	}
+	if status, body := initiator.do("DELETE", active, nil); status != http.StatusNoContent {
+		t.Fatalf("удаление: %d %v", status, body)
+	}
+	if status, _ := initiator.do("GET", active, nil); status != http.StatusNotFound {
+		t.Errorf("после удаления собрание открывается: %d", status)
+	}
+
+	finished := create()
+	initiator.do("POST", finished+"/finish", nil)
+	if status, body := initiator.do("DELETE", finished, nil); status != http.StatusConflict {
+		t.Errorf("удаление завершённого: %d %v, хотели 409", status, body)
 	}
 }

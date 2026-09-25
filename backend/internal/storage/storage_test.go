@@ -567,3 +567,86 @@ func TestTotalAreaFromRegistry(t *testing.T) {
 		t.Errorf("площадь изменена после публикации: %v", err)
 	}
 }
+
+func TestDeleteMeeting(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	flats, _ := demoFlats(t)
+
+	count := func(table string) int {
+		var n int
+		if err := db.pool.QueryRow(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// Идущее голосование с подтверждённым и неподтверждённым голосом.
+	meeting := newMeeting(t, db, 10)
+	if err := db.ImportRegistry(ctx, meeting.ID, flats); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Publish(ctx, meeting.ID); err != nil {
+		t.Fatal(err)
+	}
+	units, owners, _ := db.Registry(ctx, meeting.ID)
+	confirmed, _, _ := db.ClaimFlat(ctx, meeting.ID, units[0].Number, User{MaxID: 20})
+	_ = db.Vote(ctx, meeting.ID, 20, domain.ChoiceFor)
+	if err := db.ConfirmClaim(ctx, meeting.ID, confirmed.ID, owners[0].OwnerID); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _ = db.ClaimFlat(ctx, meeting.ID, units[1].Number, User{MaxID: 30})
+	_ = db.Vote(ctx, meeting.ID, 30, domain.ChoiceAgainst)
+
+	if err := db.DeleteMeeting(ctx, meeting.ID, 99); !errors.Is(err, ErrNotFound) {
+		t.Errorf("удалил чужой: %v", err)
+	}
+	if err := db.DeleteMeeting(ctx, meeting.ID, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Meeting(ctx, meeting.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("собрание осталось: %v", err)
+	}
+	for _, table := range []string{"flats", "owners", "claims", "votes", "houses"} {
+		if n := count(table); n != 0 {
+			t.Errorf("после удаления в %s осталось %d строк", table, n)
+		}
+	}
+	// Пользователи — не часть собрания, они остаются.
+	if count("users") == 0 {
+		t.Error("вместе с собранием удалились пользователи")
+	}
+
+	// Дом с чатом остаётся для следующих собраний.
+	first, second := newMeeting(t, db, 10), newMeeting(t, db, 10)
+	_ = db.BindChat(ctx, first.ID, 777, 10)
+	_ = db.BindChat(ctx, second.ID, 777, 10)
+	if err := db.DeleteMeeting(ctx, first.ID, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteMeeting(ctx, second.ID, 10); err != nil {
+		t.Fatal(err)
+	}
+	var chat int64
+	if err := db.pool.QueryRow(ctx, `SELECT chat_id FROM houses`).Scan(&chat); err != nil || chat != 777 {
+		t.Errorf("дом с чатом удалился: %v, %v", chat, err)
+	}
+
+	// Завершённое — явно или по сроку — удалить нельзя.
+	finished := newMeeting(t, db, 10)
+	_ = db.ImportRegistry(ctx, finished.ID, flats)
+	_ = db.Publish(ctx, finished.ID)
+	_ = db.Finish(ctx, finished.ID)
+	if err := db.DeleteMeeting(ctx, finished.ID, 10); !errors.Is(err, ErrMeetingClosed) {
+		t.Errorf("завершённое: %v", err)
+	}
+	expired := newMeeting(t, db, 10)
+	_ = db.ImportRegistry(ctx, expired.ID, flats)
+	_ = db.Publish(ctx, expired.ID)
+	if _, err := db.pool.Exec(ctx, `UPDATE votings SET ends_at = now() - interval '1 hour' WHERE id = $1`, expired.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteMeeting(ctx, expired.ID, 10); !errors.Is(err, ErrMeetingClosed) {
+		t.Errorf("с истёкшим сроком: %v", err)
+	}
+}
