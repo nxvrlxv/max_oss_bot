@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"oss-max/internal/storage"
@@ -61,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/meetings", s.auth(s.createMeeting))
 	mux.HandleFunc("PUT /api/meetings/{id}", s.auth(s.initiator(s.updateMeeting)))
 	mux.HandleFunc("POST /api/meetings/{id}/registry", s.auth(s.initiator(s.uploadRegistry)))
+	mux.HandleFunc("PUT /api/meetings/{id}/total-area", s.auth(s.initiator(s.setTotalArea)))
 	mux.HandleFunc("POST /api/meetings/{id}/publish", s.auth(s.initiator(s.publish)))
 	mux.HandleFunc("POST /api/meetings/{id}/finish", s.auth(s.initiator(s.finish)))
 	mux.HandleFunc("GET /api/meetings/{id}/dashboard", s.auth(s.initiator(s.dashboard)))
@@ -221,7 +223,11 @@ func serverError(w http.ResponseWriter, r *http.Request, err error) {
 func storeError(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid storage.ErrInvalid
 	var other storage.ErrOtherPerson
+	var below storage.ErrAreaBelowRegistry
 	switch {
+	case errors.As(err, &below):
+		writeError(w, http.StatusBadRequest, "Площадь дома не может быть меньше суммы площадей помещений в реестре — "+
+			strings.Replace(strconv.FormatFloat(below.RegistryArea, 'f', -1, 64), ".", ",", 1)+" м²")
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Reason)
 	case errors.As(err, &other):
@@ -229,6 +235,8 @@ func storeError(w http.ResponseWriter, r *http.Request, err error) {
 			"». Одним аккаунтом голосует один человек из реестра — другой собственник голосует со своего")
 	case errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, "Не найдено")
+	case errors.Is(err, storage.ErrNoRegistry):
+		writeError(w, http.StatusConflict, "Сначала загрузите реестр собственников")
 	case errors.Is(err, storage.ErrNotDraft):
 		writeError(w, http.StatusConflict, "Собрание уже опубликовано, менять его нельзя")
 	case errors.Is(err, storage.ErrCannotVote):

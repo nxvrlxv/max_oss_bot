@@ -554,9 +554,10 @@ func acceptingVotes(ctx context.Context, tx pgx.Tx, meetingID int) error {
 	return nil
 }
 
-func upsertUser(ctx context.Context, tx pgx.Tx, user User) (int, error) {
+// upsertUser — общий для SaveUser и транзакций с заявками.
+func upsertUser(ctx context.Context, q querier, user User) (int, error) {
 	var id int
-	err := tx.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		INSERT INTO users (max_id, full_name, username)
 		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''))
 		ON CONFLICT (max_id) DO UPDATE SET

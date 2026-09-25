@@ -26,7 +26,16 @@ var (
 
 	// ErrCannotVote — голосование закрыто или помещение не заявлено этим пользователем.
 	ErrCannotVote = errors.New("голосовать нельзя")
+
+	// ErrNoRegistry — публиковать нельзя: реестр собственников не загружен,
+	// не из чего посчитать площадь дома и кворум.
+	ErrNoRegistry = errors.New("реестр собственников не загружен")
 )
+
+// querier — общее у пула и транзакции: upsertUser работает с обоими.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 type Store struct {
 	pool *pgxpool.Pool

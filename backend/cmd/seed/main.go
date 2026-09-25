@@ -11,7 +11,6 @@ import (
 	"log"
 	"math/rand/v2"
 	"os"
-	"strconv"
 	"time"
 
 	"oss-max/internal/config"
@@ -66,19 +65,13 @@ func main() {
 		log.Printf("предупреждение: %s", warning)
 	}
 
-	totalArea, err := strconv.ParseFloat(report.FlatsArea, 64)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	endsAt := time.Now().Add(14 * 24 * time.Hour)
 	meeting, err := db.CreateMeeting(ctx, storage.NewMeeting{
 		InitiatorMaxID: *initiator,
 		Address:        report.HouseAddress,
 		Question:       *question,
 		Rule:           pickRule(*rule),
-		TotalArea:      totalArea,
-		EntrancesCount: 4,
+		EntrancesCount: 4, // площадь дома посчитается из реестра при импорте
 		EndsAt:         &endsAt,
 	})
 	if err != nil {

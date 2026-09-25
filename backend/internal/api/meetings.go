@@ -71,7 +71,8 @@ type meetingView struct {
 	StartsAt       *time.Time      `json:"starts_at,omitempty"`
 	EndsAt         *time.Time      `json:"ends_at,omitempty"`
 	Rule           ruleView        `json:"rule"`
-	TotalArea      float64         `json:"total_area"`
+	TotalArea      float64         `json:"total_area"`        // 0, пока реестр не загружен
+	AreaSource     string          `json:"total_area_source"` // registry или manual
 	EntrancesCount int             `json:"entrances_count"`
 	IsInitiator    bool            `json:"is_initiator"`
 	ChatBound      bool            `json:"chat_bound"`
@@ -97,6 +98,7 @@ func (s *Server) view(r *http.Request, meeting storage.Meeting, withRegistry boo
 		EndsAt:         meeting.EndsAt,
 		Rule:           viewRule(meeting.Rule),
 		TotalArea:      meeting.TotalArea,
+		AreaSource:     meeting.AreaSource,
 		EntrancesCount: meeting.EntrancesCount,
 		IsInitiator:    meeting.InitiatorID == user.ID,
 		Claims:         []storage.Claim{},
@@ -211,8 +213,8 @@ func (s *Server) meeting(w http.ResponseWriter, r *http.Request) {
 type meetingInput struct {
 	Address        string     `json:"address"`
 	Question       string     `json:"question"`
-	Rule           string     `json:"rule"` // soft, hard, all
-	TotalArea      float64    `json:"total_area"`
+	Rule           string     `json:"rule"`       // soft, hard, all
+	TotalArea      float64    `json:"total_area"` // необязательно: без неё площадь посчитается из реестра
 	EntrancesCount int        `json:"entrances_count"`
 	EndsAt         *time.Time `json:"ends_at"`
 }
@@ -320,7 +322,13 @@ func (s *Server) uploadRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	warnings := append(report.CheckTotalArea(strconv.FormatFloat(meeting.TotalArea, 'f', 2, 64)), report.Warnings...)
+	// Площадь могла пересчитаться из реестра — сверяемся уже с ней.
+	// При площади из реестра расхождения не бывает, предупреждение
+	// нужно только для заданной вручную.
+	warnings := report.Warnings
+	if updated, err := s.store.Meeting(r.Context(), meeting.ID); err == nil && updated.AreaSource == storage.AreaManual {
+		warnings = append(report.CheckTotalArea(strconv.FormatFloat(updated.TotalArea, 'f', 2, 64)), warnings...)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"house_address": report.HouseAddress,
 		"flats":         report.Flats,
@@ -331,22 +339,10 @@ func (s *Server) uploadRegistry(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// publish — все условия публикации проверяет storage.Publish в одной
+// транзакции; здесь только ответ пользователю и уведомление в чат.
 func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	meeting := meetingFrom(r)
-
-	flats, err := s.store.Flats(r.Context(), meeting.ID)
-	if err != nil {
-		serverError(w, r, err)
-		return
-	}
-	if len(flats) == 0 {
-		writeError(w, http.StatusConflict, "Сначала загрузите реестр собственников")
-		return
-	}
-	if meeting.EndsAt == nil || !meeting.EndsAt.After(time.Now()) {
-		writeError(w, http.StatusConflict, "Укажите срок голосования в будущем")
-		return
-	}
 
 	if err := s.store.Publish(r.Context(), meeting.ID); err != nil {
 		storeError(w, r, err)
@@ -358,6 +354,22 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 		log.Printf("публикация собрания %d в чат %d: %v", meeting.ID, meeting.ChatID, err)
 	}
 
+	s.respondMeeting(w, r, meeting.ID, http.StatusOK)
+}
+
+// setTotalArea — площадь дома вручную; 0 возвращает её к сумме из реестра.
+func (s *Server) setTotalArea(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TotalArea float64 `json:"total_area"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	meeting := meetingFrom(r)
+	if err := s.store.SetTotalArea(r.Context(), meeting.ID, in.TotalArea); err != nil {
+		storeError(w, r, err)
+		return
+	}
 	s.respondMeeting(w, r, meeting.ID, http.StatusOK)
 }
 

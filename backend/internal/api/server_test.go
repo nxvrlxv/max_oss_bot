@@ -247,3 +247,42 @@ func TestInitiatorVotes(t *testing.T) {
 		t.Errorf("своя заявка инициатора в очереди: %v", board["pending_claims"])
 	}
 }
+
+func TestTotalAreaFlow(t *testing.T) {
+	server := testServer(t)
+	initiator := client{t: t, base: server.URL, userID: 10}
+	deadline := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+
+	// Без площади: её посчитает реестр (в testRegistry помещения на 100 м²).
+	status, created := initiator.do("POST", "/api/meetings", map[string]any{
+		"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft", "ends_at": deadline,
+	})
+	if status != http.StatusCreated || created["total_area"].(float64) != 0 || created["total_area_source"] != "registry" {
+		t.Fatalf("создание без площади: %d %v", status, created)
+	}
+	path := fmt.Sprintf("/api/meetings/%d", int(created["id"].(float64)))
+	initiator.do("POST", path+"/registry", testRegistry)
+	if _, m := initiator.do("GET", path, nil); m["total_area"].(float64) != 100 {
+		t.Errorf("площадь из реестра: %v", m["total_area"])
+	}
+
+	if status, body := initiator.do("PUT", path+"/total-area", map[string]any{"total_area": 90}); status != http.StatusBadRequest {
+		t.Errorf("ручная площадь меньше реестра: %d %v", status, body)
+	}
+	if status, m := initiator.do("PUT", path+"/total-area", map[string]any{"total_area": 120}); status != http.StatusOK || m["total_area_source"] != "manual" {
+		t.Errorf("ручная площадь: %d %v", status, m)
+	}
+	if status, _ := initiator.do("POST", path+"/publish", nil); status != http.StatusOK {
+		t.Errorf("публикация: %d", status)
+	}
+
+	// Площадь, заданная до реестра меньше его суммы, не даёт опубликовать.
+	_, low := initiator.do("POST", "/api/meetings", map[string]any{
+		"address": "ул. Садовая, д. 12", "question": "Калитка", "rule": "soft", "ends_at": deadline, "total_area": 50,
+	})
+	lowPath := fmt.Sprintf("/api/meetings/%d", int(low["id"].(float64)))
+	initiator.do("POST", lowPath+"/registry", testRegistry)
+	if status, body := initiator.do("POST", lowPath+"/publish", nil); status != http.StatusBadRequest {
+		t.Errorf("публикация с заниженной площадью: %d %v", status, body)
+	}
+}

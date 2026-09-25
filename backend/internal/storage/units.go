@@ -14,6 +14,7 @@ import (
 // ImportRegistry заменяет реестр собрания целиком: старые помещения,
 // собственники и голоса удаляются каскадом. Разрешено только в черновике —
 // после публикации реестр — это снимок, по которому уже голосуют.
+// Площадь дома пересчитывается из реестра, если не задана вручную.
 func (s *Store) ImportRegistry(ctx context.Context, meetingID int, flats []registry.Flat) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
@@ -72,7 +73,17 @@ func (s *Store) ImportRegistry(ctx context.Context, meetingID int, flats []regis
 		if err := tx.SendBatch(ctx, ownerBatch).Close(); err != nil {
 			return fmt.Errorf("собственники: %w", err)
 		}
-		return nil
+
+		// Площадь дома по умолчанию — сумма помещений из реестра. Заданную
+		// вручную не трогаем: инициатор указал её сознательно.
+		sum, err := registryArea(ctx, tx, meetingID)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE votings SET total_area = NULLIF($2::numeric, 0)
+			WHERE id = $1 AND total_area_source = 'registry'`, meetingID, sum)
+		return err
 	})
 }
 

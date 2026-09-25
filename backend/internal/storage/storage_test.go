@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"oss-max/internal/domain"
 	"oss-max/internal/registry"
@@ -59,12 +61,14 @@ func demoFlats(t *testing.T) ([]registry.Flat, registry.Report) {
 func newMeeting(t *testing.T, db *Store, initiator int64) Meeting {
 	t.Helper()
 
+	// Площадь не задаём — посчитается из реестра; срок нужен для публикации.
+	endsAt := time.Now().Add(24 * time.Hour)
 	meeting, err := db.CreateMeeting(context.Background(), NewMeeting{
 		InitiatorMaxID: initiator,
 		Address:        "г. Примерск, ул. Тестовая, д. 1",
 		Question:       "Установить шлагбаум",
 		Rule:           domain.RuleSoft(),
-		TotalArea:      1000,
+		EndsAt:         &endsAt,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -488,5 +492,78 @@ func TestSamePerson(t *testing.T) {
 	}
 	if SamePerson("Семёнов Иван", "Семёнова Ирина") {
 		t.Error("разные люди совпали")
+	}
+}
+
+// Площадь дома по умолчанию — сумма помещений из реестра; ручная —
+// только дополнительно и не меньше этой суммы.
+func TestTotalAreaFromRegistry(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+
+	flats, report := demoFlats(t)
+	registryArea, _ := strconv.ParseFloat(report.FlatsArea, 64)
+
+	endsAt := time.Now().Add(24 * time.Hour)
+	meeting, err := db.CreateMeeting(ctx, NewMeeting{
+		InitiatorMaxID: 10, Address: "ул. Тестовая, д. 1", Question: "Шлагбаум", Rule: domain.RuleSoft(),
+		EndsAt: &endsAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meeting.TotalArea != 0 || meeting.AreaSource != AreaFromRegistry {
+		t.Fatalf("до реестра: %v м², источник %q", meeting.TotalArea, meeting.AreaSource)
+	}
+
+	area := func() (float64, string) {
+		m, err := db.Meeting(ctx, meeting.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.TotalArea, m.AreaSource
+	}
+
+	if err := db.ImportRegistry(ctx, meeting.ID, flats); err != nil {
+		t.Fatal(err)
+	}
+	if got, source := area(); got != registryArea || source != AreaFromRegistry {
+		t.Errorf("после реестра: %v м² (%s), хотели %v из реестра", got, source, registryArea)
+	}
+
+	var below ErrAreaBelowRegistry
+	if err := db.SetTotalArea(ctx, meeting.ID, registryArea-1); !errors.As(err, &below) || below.RegistryArea != registryArea {
+		t.Errorf("ручная площадь меньше реестра: %v", err)
+	}
+
+	if err := db.SetTotalArea(ctx, meeting.ID, 7000); err != nil {
+		t.Fatal(err)
+	}
+	// Повторная загрузка реестра и правка вопроса ручную площадь не трогают.
+	if err := db.ImportRegistry(ctx, meeting.ID, flats); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateDraft(ctx, meeting.ID, NewMeeting{
+		Address: "ул. Тестовая, д. 1", Question: "Шлагбаум и калитка", Rule: domain.RuleSoft(), EndsAt: &endsAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, source := area(); got != 7000 || source != AreaManual {
+		t.Errorf("ручная площадь потерялась: %v м² (%s)", got, source)
+	}
+
+	// Вернуть площадь из реестра.
+	if err := db.SetTotalArea(ctx, meeting.ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got, source := area(); got != registryArea || source != AreaFromRegistry {
+		t.Errorf("возврат к реестру: %v м² (%s)", got, source)
+	}
+
+	if err := db.Publish(ctx, meeting.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetTotalArea(ctx, meeting.ID, 9000); !errors.Is(err, ErrNotDraft) {
+		t.Errorf("площадь изменена после публикации: %v", err)
 	}
 }

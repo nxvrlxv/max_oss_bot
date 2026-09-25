@@ -17,13 +17,7 @@ type User struct {
 // SaveUser создаёт пользователя или обновляет имя. Пустые поля
 // не затирают уже известные: в части событий MAX имени нет.
 func (s *Store) SaveUser(ctx context.Context, user User) error {
-	_, err := s.pool.Exec(ctx, `
-		INSERT INTO users (max_id, full_name, username)
-		VALUES ($1, NULLIF($2, ''), NULLIF($3, ''))
-		ON CONFLICT (max_id) DO UPDATE SET
-			full_name = COALESCE(EXCLUDED.full_name, users.full_name),
-			username  = COALESCE(EXCLUDED.username, users.username)`,
-		user.MaxID, user.Name, user.Username)
+	_, err := upsertUser(ctx, s.pool, user)
 	return err
 }
 
