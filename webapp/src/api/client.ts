@@ -66,6 +66,9 @@ export const api = {
   uploadRegistry: (id: number, file: File) =>
     request<RegistryReport>('POST', `/meetings/${id}/registry`, file, 'text/csv'),
   publish: (id: number) => request<Meeting>('POST', `/meetings/${id}/publish`),
+  /** Площадь дома вручную; 0 — вернуть сумму из реестра. */
+  setTotalArea: (id: number, totalArea: number) =>
+    request<Meeting>('PUT', `/meetings/${id}/total-area`, { total_area: totalArea }),
   dashboard: (id: number) => request<Dashboard>('GET', `/meetings/${id}/dashboard`),
   pendingClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims`),
   confirmClaim: (id: number, claimId: number, ownerId: number) =>

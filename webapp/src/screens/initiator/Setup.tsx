@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 
 import { api, ApiError } from '../../api/client';
-import type { RegistryReport } from '../../api/types';
+import type { Meeting, RegistryReport } from '../../api/types';
 import { BottomBar, CheckCircle, Failure, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic } from '../../lib/bridge';
 import { area, dayTime, plural } from '../../lib/format';
@@ -59,9 +59,7 @@ export function Setup({ id }: { id: number }) {
       <Step done action={<button type="button" className="btn link" style={{ width: 'auto', padding: 0 }}
         onClick={() => nav.go({ name: 'edit', id })}>Изменить</button>}>
         <div className="strong">{meeting.rule.label}</div>
-        <div className="caption">
-          До {dayTime(meeting.ends_at)} · площадь дома {area(meeting.total_area)}
-        </div>
+        <div className="caption">До {dayTime(meeting.ends_at)}</div>
       </Step>
 
       <div className="gap" />
@@ -108,6 +106,10 @@ export function Setup({ id }: { id: number }) {
       )}
 
       <div className="gap" />
+      <SectionTitle>Площадь дома</SectionTitle>
+      <AreaStep meeting={meeting} onChanged={setData} />
+
+      <div className="gap" />
       <SectionTitle>Домовой чат</SectionTitle>
       <Step done={meeting.chat_bound}>
         {meeting.chat_bound ? (
@@ -132,6 +134,79 @@ export function Setup({ id }: { id: number }) {
         </button>
       </BottomBar>
     </div>
+  );
+}
+
+// Площадь дома — база кворума. По умолчанию это сумма помещений из реестра;
+// вручную — если по техпаспорту она больше (в реестре не все помещения).
+function AreaStep({ meeting, onChanged }: { meeting: Meeting; onChanged: (m: Meeting) => void }) {
+  const nav = useNav();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const manual = meeting.total_area_source === 'manual';
+  const registryArea = meeting.registry?.area ?? 0;
+
+  async function save(totalArea: number) {
+    setSaving(true);
+    try {
+      onChanged(await api.setTotalArea(meeting.id, totalArea));
+      setEditing(false);
+      haptic.success();
+    } catch (err) {
+      nav.showError(err instanceof ApiError ? err.message : 'Не удалось сохранить площадь');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const typed = Number(value.replace(',', '.').replace(/\s/g, ''));
+
+  return (
+    <Step done={meeting.total_area > 0}>
+      {meeting.total_area > 0 ? (
+        <>
+          <div className="strong">{area(meeting.total_area)}</div>
+          <div className="caption">
+            {manual
+              ? `указана вручную${registryArea > 0 ? ` · в реестре ${area(registryArea)}` : ''}`
+              : 'сумма площадей помещений из реестра'}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="strong">Посчитается из реестра</div>
+          <div className="caption">Сумма площадей всех помещений в файле</div>
+        </>
+      )}
+      <div className="caption" style={{ marginTop: 4 }}>От неё считается кворум — нужно больше половины.</div>
+
+      {editing ? (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input className="input" inputMode="decimal" autoFocus placeholder="Площадь по техпаспорту, м²"
+            value={value} onChange={(e) => setValue(e.target.value)} aria-label="Площадь дома, м²" />
+          <div className="btn-row">
+            <button type="button" className="btn secondary" disabled={saving} onClick={() => setEditing(false)}>Отмена</button>
+            <button type="button" className="btn primary" disabled={saving || !(typed > 0)} onClick={() => save(typed)}>
+              {saving ? 'Сохраняем…' : 'Сохранить'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+          <button type="button" className="btn link" style={{ width: 'auto', paddingLeft: 0 }}
+            onClick={() => { setValue(manual ? String(meeting.total_area).replace('.', ',') : ''); setEditing(true); }}>
+            {manual ? 'Изменить' : 'По техпаспорту больше? Указать вручную'}
+          </button>
+          {manual && (
+            <button type="button" className="btn link" style={{ width: 'auto' }} disabled={saving} onClick={() => save(0)}>
+              Вернуть по реестру
+            </button>
+          )}
+        </div>
+      )}
+    </Step>
   );
 }
 

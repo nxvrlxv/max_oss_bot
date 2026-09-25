@@ -40,7 +40,6 @@ export function MeetingForm({ id }: { id?: number }) {
   const [saving, setSaving] = useState(false);
 
   const [address, setAddress] = useState('');
-  const [totalArea, setTotalArea] = useState('');
   const [entrances, setEntrances] = useState('1');
   const [question, setQuestion] = useState('');
   const [rule, setRule] = useState<RuleKind>('soft');
@@ -51,7 +50,6 @@ export function MeetingForm({ id }: { id?: number }) {
     api.meeting(id)
       .then((m) => {
         setAddress(m.address);
-        setTotalArea(String(m.total_area).replace('.', ','));
         setEntrances(String(m.entrances_count));
         setQuestion(m.question);
         if (m.rule.kind !== 'custom') setRule(m.rule.kind);
@@ -64,8 +62,8 @@ export function MeetingForm({ id }: { id?: number }) {
   if (loadError) return <Failure message={loadError} />;
   if (loading) return <Loading />;
 
-  const area = Number(totalArea.replace(',', '.').replace(/\s/g, ''));
-  const valid = address.trim() !== '' && question.trim() !== '' && area > 0 && deadline !== '';
+  // Площадь дома здесь не спрашиваем: она посчитается из реестра на следующем шаге.
+  const valid = address.trim() !== '' && question.trim() !== '' && deadline !== '';
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
@@ -75,7 +73,6 @@ export function MeetingForm({ id }: { id?: number }) {
       address: address.trim(),
       question: question.trim(),
       rule,
-      total_area: area,
       entrances_count: Math.max(1, Number(entrances) || 1),
       ends_at: fromMoscowInput(deadline),
     };
@@ -103,22 +100,11 @@ export function MeetingForm({ id }: { id?: number }) {
             placeholder="ул. Садовая, д. 12" autoComplete="street-address" />
         </label>
 
-        <div className="input-row">
-          <label className="field">
-            <span className="caption label">Площадь помещений, м²</span>
-            <input className="input" value={totalArea} onChange={(e) => setTotalArea(e.target.value)}
-              inputMode="decimal" placeholder="6 000" />
-          </label>
-          <label className="field">
-            <span className="caption label">Подъездов</span>
-            <input className="input" value={entrances} onChange={(e) => setEntrances(e.target.value)}
-              inputMode="numeric" />
-          </label>
-        </div>
-        <p className="caption" style={{ margin: '-8px 4px 0' }}>
-          Общая площадь жилых и нежилых помещений — из техпаспорта или договора управления, а не сумма из реестра.
-          От неё считается кворум.
-        </p>
+        <label className="field">
+          <span className="caption label">Подъездов</span>
+          <input className="input" value={entrances} onChange={(e) => setEntrances(e.target.value)}
+            inputMode="numeric" />
+        </label>
 
         <label className="field">
           <span className="caption label">Вопрос</span>

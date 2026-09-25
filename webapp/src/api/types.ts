@@ -34,7 +34,8 @@ export interface Meeting {
   starts_at?: string;
   ends_at?: string;
   rule: Rule;
-  total_area: number;
+  total_area: number; // 0, пока реестр не загружен
+  total_area_source: 'registry' | 'manual';
   entrances_count: number;
   is_initiator: boolean;
   chat_bound: boolean;
@@ -114,7 +115,6 @@ export interface MeetingInput {
   address: string;
   question: string;
   rule: 'soft' | 'hard' | 'all';
-  total_area: number;
   entrances_count: number;
   ends_at: string;
 }

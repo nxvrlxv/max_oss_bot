@@ -71,6 +71,10 @@ export function Dashboard({ id }: { id: number }) {
           <QuorumCheck quorum={board.quorum} total={total} />
           <DecisionCheck decision={board.decision} meeting={meeting} total={total} quorum={board.quorum.passed} />
         </div>
+
+        <div className="caption" style={{ marginTop: 16 }}>
+          Площадь дома {area(total)} · {meeting.total_area_source === 'manual' ? 'указана вручную' : 'по реестру'}
+        </div>
       </div>
 
       {board.pending_claims > 0 && (
