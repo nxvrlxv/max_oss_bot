@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { api } from '../../api/client';
 import { choiceLabels, type Meeting, type Threshold } from '../../api/types';
 import { CancelFlat } from '../../components/CancelFlat';
+import { DeleteMeeting } from '../../components/DeleteMeeting';
 import { InviteCard } from '../../components/InviteCard';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, plural, shortName } from '../../lib/format';
@@ -130,6 +131,13 @@ export function Dashboard({ id }: { id: number }) {
             Сверху — самые крупные: обход в этом порядке быстрее всего закрывает разрыв.
           </p>
         </>
+      )}
+
+      {open && (
+        <div style={{ padding: '0 12px' }}>
+          {/* Голоса считаем по помещениям с учтённым голосом и по заявкам, где голос уже отдан. */}
+          <DeleteMeeting meeting={meeting} votes={board.flats_voted + board.pending_votes.count} />
+        </div>
       )}
 
       {board.pending_claims > 0 && (

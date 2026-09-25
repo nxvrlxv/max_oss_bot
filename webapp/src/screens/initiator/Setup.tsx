@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react';
 
 import { api, ApiError } from '../../api/client';
 import type { Meeting, RegistryReport } from '../../api/types';
+import { DeleteMeeting } from '../../components/DeleteMeeting';
 import { BottomBar, CheckCircle, Failure, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic } from '../../lib/bridge';
 import { area, dayTime, plural } from '../../lib/format';
@@ -127,6 +128,10 @@ export function Setup({ id }: { id: number }) {
           </>
         )}
       </Step>
+
+      <div style={{ padding: '0 12px' }}>
+        <DeleteMeeting meeting={meeting} />
+      </div>
 
       <BottomBar hint={hasRegistry ? 'После публикации вопрос и реестр изменить нельзя' : 'Сначала загрузите реестр'}>
         <button type="button" className="btn primary large" disabled={!hasRegistry || publishing} onClick={publish}>

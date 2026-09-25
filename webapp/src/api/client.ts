@@ -63,6 +63,7 @@ export const api = {
 
   create: (input: MeetingInput) => request<Meeting>('POST', '/meetings', input),
   update: (id: number, input: MeetingInput) => request<Meeting>('PUT', `/meetings/${id}`, input),
+  deleteMeeting: (id: number) => request<void>('DELETE', `/meetings/${id}`),
   uploadRegistry: (id: number, file: File) =>
     request<RegistryReport>('POST', `/meetings/${id}/registry`, file, 'text/csv'),
   publish: (id: number) => request<Meeting>('POST', `/meetings/${id}/publish`),
