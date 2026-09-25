@@ -71,8 +71,8 @@ func main() {
 		Address:        report.HouseAddress,
 		Question:       *question,
 		Rule:           pickRule(*rule),
-		EntrancesCount: 4, // площадь дома посчитается из реестра при импорте
-		EndsAt:         &endsAt,
+		// Площадь дома не задаём — посчитается из реестра при импорте.
+		EndsAt: &endsAt,
 	})
 	if err != nil {
 		log.Fatal(err)

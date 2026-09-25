@@ -64,24 +64,23 @@ type summaryView struct {
 }
 
 type meetingView struct {
-	ID             int             `json:"id"`
-	Question       string          `json:"question"`
-	Address        string          `json:"address"`
-	Status         string          `json:"status"` // с учётом истёкшего срока
-	StartsAt       *time.Time      `json:"starts_at,omitempty"`
-	EndsAt         *time.Time      `json:"ends_at,omitempty"`
-	Rule           ruleView        `json:"rule"`
-	TotalArea      float64         `json:"total_area"`        // 0, пока реестр не загружен
-	AreaSource     string          `json:"total_area_source"` // registry или manual
-	EntrancesCount int             `json:"entrances_count"`
-	IsInitiator    bool            `json:"is_initiator"`
-	ChatBound      bool            `json:"chat_bound"`
-	InviteLink     string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
-	Claims         []storage.Claim `json:"claims"`
-	Choice         domain.Choice   `json:"choice,omitempty"`
-	VotedAt        *time.Time      `json:"voted_at,omitempty"`
-	Registry       *registryView   `json:"registry,omitempty"`
-	Summary        *summaryView    `json:"summary,omitempty"`
+	ID          int             `json:"id"`
+	Question    string          `json:"question"`
+	Address     string          `json:"address"`
+	Status      string          `json:"status"` // с учётом истёкшего срока
+	StartsAt    *time.Time      `json:"starts_at,omitempty"`
+	EndsAt      *time.Time      `json:"ends_at,omitempty"`
+	Rule        ruleView        `json:"rule"`
+	TotalArea   float64         `json:"total_area"`        // 0, пока реестр не загружен
+	AreaSource  string          `json:"total_area_source"` // registry или manual
+	IsInitiator bool            `json:"is_initiator"`
+	ChatBound   bool            `json:"chat_bound"`
+	InviteLink  string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
+	Claims      []storage.Claim `json:"claims"`
+	Choice      domain.Choice   `json:"choice,omitempty"`
+	VotedAt     *time.Time      `json:"voted_at,omitempty"`
+	Registry    *registryView   `json:"registry,omitempty"`
+	Summary     *summaryView    `json:"summary,omitempty"`
 }
 
 // view собирает собрание глазами конкретного человека.
@@ -90,18 +89,17 @@ func (s *Server) view(r *http.Request, meeting storage.Meeting, withRegistry boo
 	user := currentUser(r)
 
 	view := meetingView{
-		ID:             meeting.ID,
-		Question:       meeting.Question,
-		Address:        meeting.Address,
-		Status:         meeting.Status,
-		StartsAt:       meeting.StartsAt,
-		EndsAt:         meeting.EndsAt,
-		Rule:           viewRule(meeting.Rule),
-		TotalArea:      meeting.TotalArea,
-		AreaSource:     meeting.AreaSource,
-		EntrancesCount: meeting.EntrancesCount,
-		IsInitiator:    meeting.InitiatorID == user.ID,
-		Claims:         []storage.Claim{},
+		ID:          meeting.ID,
+		Question:    meeting.Question,
+		Address:     meeting.Address,
+		Status:      meeting.Status,
+		StartsAt:    meeting.StartsAt,
+		EndsAt:      meeting.EndsAt,
+		Rule:        viewRule(meeting.Rule),
+		TotalArea:   meeting.TotalArea,
+		AreaSource:  meeting.AreaSource,
+		IsInitiator: meeting.InitiatorID == user.ID,
+		Claims:      []storage.Claim{},
 	}
 	if meeting.Closed(time.Now()) {
 		view.Status = storage.MeetingFinished
@@ -211,12 +209,11 @@ func (s *Server) meeting(w http.ResponseWriter, r *http.Request) {
 }
 
 type meetingInput struct {
-	Address        string     `json:"address"`
-	Question       string     `json:"question"`
-	Rule           string     `json:"rule"`       // soft, hard, all
-	TotalArea      float64    `json:"total_area"` // необязательно: без неё площадь посчитается из реестра
-	EntrancesCount int        `json:"entrances_count"`
-	EndsAt         *time.Time `json:"ends_at"`
+	Address   string     `json:"address"`
+	Question  string     `json:"question"`
+	Rule      string     `json:"rule"`       // soft, hard, all
+	TotalArea float64    `json:"total_area"` // необязательно: без неё площадь посчитается из реестра
+	EndsAt    *time.Time `json:"ends_at"`
 }
 
 func (in meetingInput) toNew(initiator int64) (storage.NewMeeting, error) {
@@ -233,7 +230,6 @@ func (in meetingInput) toNew(initiator int64) (storage.NewMeeting, error) {
 		Question:       in.Question,
 		Rule:           rule,
 		TotalArea:      in.TotalArea,
-		EntrancesCount: in.EntrancesCount,
 		EndsAt:         in.EndsAt,
 	}, nil
 }

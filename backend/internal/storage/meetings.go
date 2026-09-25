@@ -29,20 +29,19 @@ const (
 
 // Meeting — собрание вместе с домом, к которому оно относится.
 type Meeting struct {
-	ID             int
-	InitiatorID    int64 // max_id создавшего
-	ChatID         int64 // домовой чат; 0, если не привязан
-	HouseID        int
-	Address        string
-	Question       string
-	Rule           domain.Rule
-	TotalArea      float64 // 0, пока реестр не загружен
-	AreaSource     string  // AreaFromRegistry или AreaManual
-	EntrancesCount int
-	InviteToken    string
-	Status         string
-	StartsAt       *time.Time
-	EndsAt         *time.Time
+	ID          int
+	InitiatorID int64 // max_id создавшего
+	ChatID      int64 // домовой чат; 0, если не привязан
+	HouseID     int
+	Address     string
+	Question    string
+	Rule        domain.Rule
+	TotalArea   float64 // 0, пока реестр не загружен
+	AreaSource  string  // AreaFromRegistry или AreaManual
+	InviteToken string
+	Status      string
+	StartsAt    *time.Time
+	EndsAt      *time.Time
 }
 
 // NewMeeting — то, что инициатор вводит в мини-приложении.
@@ -52,7 +51,6 @@ type NewMeeting struct {
 	Question       string
 	Rule           domain.Rule
 	TotalArea      float64 // 0 — посчитать из реестра; больше нуля — задано вручную
-	EntrancesCount int
 	StartsAt       *time.Time
 	EndsAt         *time.Time
 }
@@ -77,15 +75,12 @@ func (m *NewMeeting) validate() error {
 	case m.EndsAt != nil && m.StartsAt != nil && !m.EndsAt.After(*m.StartsAt):
 		return ErrInvalid{"Окончание голосования должно быть позже начала"}
 	}
-	if m.EntrancesCount < 1 {
-		m.EntrancesCount = 1
-	}
 	return nil
 }
 
 const meetingSelect = `
 	SELECT v.id, u.max_id, COALESCE(h.chat_id, 0), h.id, h.address,
-	       v.question, v.rule_json, COALESCE(v.total_area, 0), v.total_area_source, v.entrances_count,
+	       v.question, v.rule_json, COALESCE(v.total_area, 0), v.total_area_source,
 	       v.invite_token, v.status, v.starts_at, v.ends_at
 	FROM votings v
 	JOIN houses h ON h.id = v.house_id
@@ -94,7 +89,7 @@ const meetingSelect = `
 func scanMeeting(row pgx.Row) (Meeting, error) {
 	var m Meeting
 	err := row.Scan(&m.ID, &m.InitiatorID, &m.ChatID, &m.HouseID, &m.Address,
-		&m.Question, &m.Rule, &m.TotalArea, &m.AreaSource, &m.EntrancesCount,
+		&m.Question, &m.Rule, &m.TotalArea, &m.AreaSource,
 		&m.InviteToken, &m.Status, &m.StartsAt, &m.EndsAt)
 	return m, err
 }
@@ -130,13 +125,13 @@ func (s *Store) CreateMeeting(ctx context.Context, m NewMeeting) (Meeting, error
 		// Площадь не указана — её посчитает загрузка реестра.
 		return tx.QueryRow(ctx, `
 			INSERT INTO votings (house_id, initiator_user_id, question, rule_json,
-			                     total_area, total_area_source, entrances_count, invite_token, starts_at, ends_at)
+			                     total_area, total_area_source, invite_token, starts_at, ends_at)
 			VALUES ($1, $2, $3, $4, NULLIF($5::numeric, 0),
 			        CASE WHEN $5::numeric > 0 THEN 'manual' ELSE 'registry' END,
-			        $6, $7, $8, $9)
+			        $6, $7, $8)
 			RETURNING id`,
 			houseID, userID, strings.TrimSpace(m.Question), m.Rule,
-			m.TotalArea, m.EntrancesCount, token, m.StartsAt, m.EndsAt).Scan(&id)
+			m.TotalArea, token, m.StartsAt, m.EndsAt).Scan(&id)
 	})
 	if err != nil {
 		return Meeting{}, fmt.Errorf("создание собрания: %w", err)
@@ -271,11 +266,10 @@ func (s *Store) UpdateDraft(ctx context.Context, meetingID int, m NewMeeting) er
 		var houseID int
 		err := tx.QueryRow(ctx, `
 			UPDATE votings
-			SET question = $2, rule_json = $3, entrances_count = $4, starts_at = $5, ends_at = $6
+			SET question = $2, rule_json = $3, starts_at = $4, ends_at = $5
 			WHERE id = $1 AND status = 'draft'
 			RETURNING house_id`,
-			meetingID, strings.TrimSpace(m.Question), m.Rule, m.EntrancesCount,
-			m.StartsAt, m.EndsAt).Scan(&houseID)
+			meetingID, strings.TrimSpace(m.Question), m.Rule, m.StartsAt, m.EndsAt).Scan(&houseID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotDraft
 		}

@@ -40,7 +40,6 @@ export function MeetingForm({ id }: { id?: number }) {
   const [saving, setSaving] = useState(false);
 
   const [address, setAddress] = useState('');
-  const [entrances, setEntrances] = useState('1');
   const [question, setQuestion] = useState('');
   const [rule, setRule] = useState<RuleKind>('soft');
   const [deadline, setDeadline] = useState(defaultDeadline);
@@ -50,7 +49,6 @@ export function MeetingForm({ id }: { id?: number }) {
     api.meeting(id)
       .then((m) => {
         setAddress(m.address);
-        setEntrances(String(m.entrances_count));
         setQuestion(m.question);
         if (m.rule.kind !== 'custom') setRule(m.rule.kind);
         if (m.ends_at) setDeadline(toMoscowInput(m.ends_at));
@@ -73,7 +71,6 @@ export function MeetingForm({ id }: { id?: number }) {
       address: address.trim(),
       question: question.trim(),
       rule,
-      entrances_count: Math.max(1, Number(entrances) || 1),
       ends_at: fromMoscowInput(deadline),
     };
     try {
@@ -98,12 +95,6 @@ export function MeetingForm({ id }: { id?: number }) {
           <span className="caption label">Адрес дома</span>
           <input className="input" value={address} onChange={(e) => setAddress(e.target.value)}
             placeholder="ул. Садовая, д. 12" autoComplete="street-address" />
-        </label>
-
-        <label className="field">
-          <span className="caption label">Подъездов</span>
-          <input className="input" value={entrances} onChange={(e) => setEntrances(e.target.value)}
-            inputMode="numeric" />
         </label>
 
         <label className="field">

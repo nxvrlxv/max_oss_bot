@@ -119,8 +119,8 @@ func TestInviteAccess(t *testing.T) {
 
 	status, created := initiator.do("POST", "/api/meetings", map[string]any{
 		"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft",
-		"total_area": 100, "entrances_count": 1,
-		"ends_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"total_area": 100,
+		"ends_at":    time.Now().Add(24 * time.Hour).Format(time.RFC3339),
 	})
 	if status != http.StatusCreated {
 		t.Fatalf("создание: %d %v", status, created)
@@ -197,8 +197,8 @@ func TestInitiatorVotes(t *testing.T) {
 
 	_, created := initiator.do("POST", "/api/meetings", map[string]any{
 		"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft",
-		"total_area": 100, "entrances_count": 1,
-		"ends_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+		"total_area": 100,
+		"ends_at":    time.Now().Add(24 * time.Hour).Format(time.RFC3339),
 	})
 	meetingPath := fmt.Sprintf("/api/meetings/%d", int(created["id"].(float64)))
 	initiator.do("POST", meetingPath+"/registry", testRegistry)
