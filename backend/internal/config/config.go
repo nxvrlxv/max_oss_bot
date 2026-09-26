@@ -31,7 +31,7 @@ const (
 
 	// Адрес по умолчанию: сертификат platform-api2 выпущен УЦ Минцифры,
 	// без его установки в систему соединение обрывается.
-	defaultAPIBase = "https://platform-api.max.ru/"
+	defaultAPIBase = "https://platform2-api.max.ru/"
 )
 
 func Load() (Config, error) {
