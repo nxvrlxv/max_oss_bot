@@ -6,8 +6,8 @@ import { CancelFlat } from '../../components/CancelFlat';
 import { DeleteMeeting } from '../../components/DeleteMeeting';
 import { InviteCard } from '../../components/InviteCard';
 import { ChatBinding } from '../../components/ChatBinding';
-import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
-import { area, dayTime, initials, percent, plural, shortName } from '../../lib/format';
+import { Badge, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
+import { area, dayTime, initials, percent, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
 const PAGE = 7;
@@ -35,7 +35,7 @@ export function Dashboard({ id }: { id: number }) {
   }
 
   return (
-    <div className={`screen ${board.pending_claims > 0 ? 'with-bar' : ''}`}>
+    <div className="screen">
       <div className="header">
         <div className="caption">Вопрос собрания · {meeting.address}</div>
         <h1 className="h1">{meeting.question}</h1>
@@ -79,26 +79,26 @@ export function Dashboard({ id }: { id: number }) {
         </div>
       </div>
 
-      {board.pending_claims > 0 && (
-        <button type="button" className="card" style={{ marginTop: 12 }} onClick={() => nav.go({ name: 'claims', id })}>
-          <div className="card-top">
-            <div className="strong">Заявки на проверку</div>
-            <span className="count">{board.pending_claims}</span>
-          </div>
-          <div className="caption" style={{ marginTop: 4 }}>
-            {board.pending_votes.count > 0
-              ? `${board.pending_votes.count} ${plural(board.pending_votes.count, ['голос уже отдан', 'голоса уже отданы', 'голосов уже отданы'])} — в итог попадут, когда вы сверите собственников с реестром`
-              : 'Сверьте собственников с реестром — после этого их голоса попадут в итог'}
-          </div>
+      <div className="claims-action">
+        <button type="button" className="btn claims-button"
+          aria-label={board.pending_claims > 0 ? `Заявки: ${board.pending_claims} на проверке` : 'Заявки и подтверждённые собственники'}
+          onClick={() => nav.go({ name: 'claims', id })}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="5" y="4" width="14" height="17" rx="3" />
+            <path d="M9 4V2h6v2M9 10h6M9 15l2 2 4-4" />
+          </svg>
+          <span>Заявки</span>
+          {board.pending_claims > 0 && <span className="claims-button-count">{board.pending_claims}</span>}
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 4 4 4-4 4" /></svg>
         </button>
-      )}
+        <div className="caption">
+          {board.pending_claims > 0 ? 'Есть заявки на проверку' : 'Проверка и подтверждённые собственники'}
+        </div>
+      </div>
 
       <MyVoteCard meeting={meeting} onChanged={reload} />
-
-      <button type="button" className="btn secondary" style={{ marginTop: 12 }} onClick={() => nav.go({ name: 'claims', id })}>
-        Заявки и подтверждённые собственники
-      </button>
-
       {open && <div style={{ marginTop: 12 }}><ChatBinding meeting={meeting} onRefresh={reload} /></div>}
 
       {open && meeting.invite_link && (
@@ -147,13 +147,7 @@ export function Dashboard({ id }: { id: number }) {
         </div>
       )}
 
-      {board.pending_claims > 0 && (
-        <BottomBar>
-          <button type="button" className="btn primary large" onClick={() => nav.go({ name: 'claims', id })}>
-            Проверить заявки · {board.pending_claims}
-          </button>
-        </BottomBar>
-      )}
+
     </div>
   );
 }
