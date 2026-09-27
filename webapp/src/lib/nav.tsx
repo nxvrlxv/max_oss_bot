@@ -1,0 +1,70 @@
+import { createContext, useContext, useRef } from 'react';
+
+// Экраны приложения. Навигация — стек в памяти: мини-приложение живёт
+// в одном окне MAX, адресная строка пользователю не видна.
+export type Route =
+  | { name: 'home' }
+  | { name: 'join'; token: string } // приглашение из ссылки, QR или кнопки в чате дома
+  | { name: 'open'; id: number } // решает, куда вести: инициатора — на дашборд, собственника — к голосованию
+  | { name: 'pick'; id: number }
+  | { name: 'vote'; id: number }
+  | { name: 'create' }
+  | { name: 'edit'; id: number }
+  | { name: 'setup'; id: number }
+  | { name: 'dashboard'; id: number }
+  | { name: 'claims'; id: number };
+
+export interface Nav {
+  go(route: Route): void;
+  replace(route: Route): void;
+  back(): void;
+  /** Сбрасывает стек: после публикации «назад» в форму не нужен. */
+  reset(route: Route): void;
+  canGoBack: boolean;
+  showError(message: string): void;
+  /** Нейтральное всплывающее сообщение: «Ссылка скопирована». */
+  showNotice(message: string): void;
+  /** Панель диагностики запуска: что пришло от MAX. */
+  openDiagnostics(): void;
+}
+
+export const NavContext = createContext<Nav | null>(null);
+
+export function useNav(): Nav {
+  const nav = useContext(NavContext);
+  if (!nav) throw new Error('useNav вне NavContext');
+  return nav;
+}
+
+/** Пять быстрых нажатий — открыть диагностику. Вешается на заголовки. */
+export function useSecretTaps(): () => void {
+  const nav = useNav();
+  const taps = useRef<number[]>([]);
+  return () => {
+    const now = Date.now();
+    taps.current = [...taps.current.filter((t) => now - t < 2000), now];
+    if (taps.current.length >= 5) {
+      taps.current = [];
+      nav.openDiagnostics();
+    }
+  };
+}
+
+/** Разбирает нагрузку запуска: «join_<токен>», «open_42», «claims_42», «new», «list». */
+export function routeFromStart(param: string): Route {
+  // «open_42»; двоеточие — старый формат кнопок.
+  const [action, rawId] = param.split(/[_:]/);
+  const id = Number(rawId);
+  switch (action) {
+    case 'join':
+      return /^[0-9a-f]{16,64}$/.test(rawId ?? '') ? { name: 'join', token: rawId } : { name: 'home' };
+    case 'open':
+      return Number.isInteger(id) && id > 0 ? { name: 'open', id } : { name: 'home' };
+    case 'claims':
+      return Number.isInteger(id) && id > 0 ? { name: 'claims', id } : { name: 'home' };
+    case 'new':
+      return { name: 'create' };
+    default:
+      return { name: 'home' };
+  }
+}
