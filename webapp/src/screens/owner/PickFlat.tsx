@@ -18,6 +18,7 @@ export function PickFlat({ id }: { id: number }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [owners, setOwners] = useState<RegistryOwner[] | null>(null);
   const [sending, setSending] = useState(false);
+  const [showExisting, setShowExisting] = useState(false);
 
   const flats = useMemo(() => {
     if (!data) return [];
@@ -29,7 +30,8 @@ export function PickFlat({ id }: { id: number }) {
   if (!data) return <Loading />;
 
   const [meeting] = data;
-  const chosen = data[1].find((f) => f.number === selected);
+  const chosen = data[1].find((f) => f.number === selected && !f.fully_voted);
+  const existingClaim = meeting.claims.find((c) => c.flat_number === selected);
 
   if (meeting.status !== 'active') {
     return <Failure message="Голосование сейчас не идёт" />;
@@ -43,7 +45,7 @@ export function PickFlat({ id }: { id: number }) {
   async function submit() {
     if (!selected) return;
     if (meeting.claims.some((c) => c.flat_number === selected)) {
-      nav.replace({ name: 'vote', id });
+      setShowExisting(true);
       return;
     }
     setSending(true);
@@ -53,6 +55,34 @@ export function PickFlat({ id }: { id: number }) {
     } catch (err) {
       fail(err, 'Не удалось отправить заявку');
     }
+  }
+
+  if (showExisting && existingClaim) {
+    return (
+      <div className="screen">
+        <div className="header">
+          <div className="caption">Квартира {existingClaim.flat_number}</div>
+          <h1 className="h1">{existingClaim.choice ? 'Вы уже проголосовали' : 'Вы уже выбрали эту квартиру'}</h1>
+        </div>
+        <div className="card" role="status">
+          {existingClaim.owner_name && <div className="strong">По реестру: {existingClaim.owner_name}</div>}
+          <p className="caption">
+            {existingClaim.choice
+              ? existingClaim.status === 'confirmed' ? 'Ваш голос подтверждён и учтён.' : 'Ваш голос сохранён и ожидает подтверждения инициатора.'
+              : 'У вас уже есть заявка на эту квартиру. Откройте её, чтобы продолжить голосование.'}
+          </p>
+          <p className="caption">
+            Квартира остаётся в списке для остальных собственников. Каждый голосует со своего аккаунта MAX — выбрать другого человека с вашего аккаунта нельзя.
+          </p>
+        </div>
+        <button type="button" className="btn primary" style={{ marginTop: 12 }}
+          onClick={() => { setShowExisting(false); setSelected(null); }}>Выбрать другую квартиру</button>
+        <button type="button" className="btn secondary" style={{ marginTop: 8 }}
+          onClick={() => nav.replace({ name: 'vote', id })}>
+          {existingClaim.choice ? 'Открыть мой голос' : 'Открыть мою заявку'}
+        </button>
+      </div>
+    );
   }
 
   if (owners && chosen) {
