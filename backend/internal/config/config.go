@@ -29,9 +29,8 @@ const (
 	ModePolling = "polling"
 	ModeWebhook = "webhook"
 
-	// Адрес по умолчанию: сертификат platform-api2 выпущен УЦ Минцифры,
-	// без его установки в систему соединение обрывается.
-	defaultAPIBase = "https://platform-api.max.ru/"
+	// Актуальный адрес API MAX. Сертификат УЦ Минцифры добавлен в образ Docker.
+	defaultAPIBase = "https://platform-api2.max.ru/"
 )
 
 func Load() (Config, error) {
