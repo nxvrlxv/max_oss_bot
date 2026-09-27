@@ -105,7 +105,7 @@ function Screen({ route }: { route: Route }) {
     case 'join': return <Join key={route.token} token={route.token} />;
     case 'open': return <Open key={route.id} id={route.id} />;
     case 'pick': return <PickFlat key={route.id} id={route.id} />;
-    case 'vote': return <Vote key={route.id} id={route.id} />;
+    case 'vote': return <Vote key={route.id} id={route.id} selection={route.selection} />;
     case 'create': return <MeetingForm />;
     case 'edit': return <MeetingForm key={route.id} id={route.id} />;
     case 'setup': return <Setup key={route.id} id={route.id} />;

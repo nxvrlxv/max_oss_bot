@@ -83,7 +83,7 @@ function HomeSubtitle({ meetings }: { meetings: Meeting[] }) {
 
   const claims = meetings.flatMap((m) => m.claims);
   const flats = [...new Map(claims.map((c) => [c.flat_number, c])).values()];
-  const flatText = flats.length === 1 ? ` · кв. ${flats[0].flat_number}, ${area(flats[0].flat_area)}` : '';
+  const flatText = flats.length === 1 ? ` · кв. ${flats[0].flat_number}${flats[0].weight > 0 ? `, доля ${area(flats[0].weight)}` : ''}` : '';
 
   return <div className="caption">{addresses[0]}{flatText}</div>;
 }

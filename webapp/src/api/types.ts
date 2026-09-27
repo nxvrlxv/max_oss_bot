@@ -14,6 +14,8 @@ export interface Rule {
 }
 
 export interface Claim {
+  owner_id?: number;
+  requested_owner_id?: number;
   id: number;
   flat_id: number;
   flat_number: string;
@@ -95,6 +97,13 @@ export interface RegistryOwner {
   name: string;
   owned_area: number;
   taken: boolean;
+}
+
+export interface OwnerSelection {
+  flat_number: string;
+  owner_id: number;
+  owner_name: string;
+  weight: number;
 }
 
 export interface PendingClaim extends Claim {

@@ -7,10 +7,7 @@ import { haptic } from '../../lib/bridge';
 import { area, dayTime, samePerson } from '../../lib/format';
 import { useNav } from '../../lib/nav';
 
-// Выбор своей квартиры. Соседу ФИО собственников не показываем:
-// он называет квартиру, а инициатор сверяет его с реестром.
-// Инициатор реестр и так видит, поэтому сразу выбирает себя в нём —
-// и его заявка подтверждается без очереди.
+// Квартира и собственник выбираются локально; заявка появится вместе с голосом.
 export function PickFlat({ id }: { id: number }) {
   const nav = useNav();
   const { data, error, reload } = useLoad(
@@ -48,14 +45,8 @@ export function PickFlat({ id }: { id: number }) {
     if (!selected) return;
     setSending(true);
     try {
-      if (meeting.is_initiator) {
-        setOwners(await api.flatOwners(id, selected));
-        setSending(false);
-        return;
-      }
-      await api.claim(id, selected);
-      haptic.success();
-      nav.replace({ name: 'vote', id });
+      setOwners(await api.flatOwners(id, selected));
+      setSending(false);
     } catch (err) {
       fail(err, 'Не удалось отправить заявку');
     }
@@ -63,19 +54,14 @@ export function PickFlat({ id }: { id: number }) {
 
   if (owners && chosen) {
     // Кем человек уже подтверждён по другой квартире — тем он и остаётся.
-    const myName = meeting.claims.find((c) => c.status === 'confirmed' && c.owner_name)?.owner_name;
+    const myName = meeting.claims.find((c) => c.owner_name)?.owner_name;
     return (
       <OwnerStep flat={chosen} owners={owners} myName={myName} sending={sending}
         onBack={() => setOwners(null)}
-        onConfirm={async (ownerId) => {
-          setSending(true);
-          try {
-            await api.claim(id, chosen.number, ownerId);
-            haptic.success();
-            nav.replace({ name: 'vote', id });
-          } catch (err) {
-            fail(err, 'Не удалось сохранить');
-          }
+        onConfirm={(ownerId) => {
+          const owner = owners.find((o) => o.id === ownerId)!;
+          nav.replace({ name: 'vote', id, selection: { flat_number: chosen.number, owner_id: owner.id,
+            owner_name: owner.name, weight: owner.owned_area } });
         }} />
     );
   }
@@ -95,7 +81,7 @@ export function PickFlat({ id }: { id: number }) {
           <div className="caption">
             {meeting.is_initiator
               ? 'Затем укажите себя в реестре — ваш голос будет учтён сразу.'
-              : 'Инициатор сверит заявку с реестром собственников. Проголосовать можно сразу — голос будет учтён после подтверждения.'}
+              : 'Затем выберите себя по реестру и проголосуйте. Только после этого заявка отправится инициатору; до подтверждения голос не учитывается.'}
           </div>
         </div>
       </div>
@@ -119,7 +105,7 @@ export function PickFlat({ id }: { id: number }) {
       {chosen && (
         <BottomBar hint={`Кв. ${chosen.number} · ${area(chosen.area)}`}>
           <button type="button" className="btn primary large" disabled={sending} onClick={submit}>
-            {sending ? 'Секунду…' : meeting.is_initiator ? 'Далее' : 'Это моя квартира'}
+            {sending ? 'Секунду…' : 'Выбрать собственника'}
           </button>
         </BottomBar>
       )}
@@ -127,7 +113,7 @@ export function PickFlat({ id }: { id: number }) {
   );
 }
 
-// Шаг инициатора: кто он в реестре этой квартиры.
+// Выбор конкретного собственника и его доли в квартире.
 function OwnerStep({ flat, owners, myName, sending, onBack, onConfirm }: {
   flat: Flat;
   owners: RegistryOwner[];
@@ -148,7 +134,7 @@ function OwnerStep({ flat, owners, myName, sending, onBack, onConfirm }: {
         <div className="caption">
           {myName
             ? `Вы уже выбраны как «${myName}» — в другой квартире можно выбрать только себя же`
-            : 'Голос будет учтён с долей этого собственника. Выбор закрепит ваше ФИО для остальных квартир'}
+            : 'Выберите себя и проверьте свою долю. Заявка будет отправлена только после подтверждения голоса на следующем шаге'}
         </div>
       </div>
 

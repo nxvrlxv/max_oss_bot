@@ -59,7 +59,8 @@ export const api = {
   flatOwners: (id: number, flatNumber: string) =>
     request<RegistryOwner[]>('GET', `/meetings/${id}/flats/${encodeURIComponent(flatNumber)}/owners`),
   cancelClaim: (id: number, claimId: number) => request<void>('DELETE', `/meetings/${id}/claims/${claimId}`),
-  vote: (id: number, choice: Choice) => request<Meeting>('POST', `/meetings/${id}/vote`, { choice }),
+  vote: (id: number, choice: Choice, selection?: { flat_number: string; owner_id: number }) =>
+    request<Meeting>('POST', `/meetings/${id}/vote`, { choice, ...selection }),
 
   create: (input: MeetingInput) => request<Meeting>('POST', '/meetings', input),
   update: (id: number, input: MeetingInput) => request<Meeting>('PUT', `/meetings/${id}`, input),
@@ -72,6 +73,8 @@ export const api = {
     request<Meeting>('PUT', `/meetings/${id}/total-area`, { total_area: totalArea }),
   dashboard: (id: number) => request<Dashboard>('GET', `/meetings/${id}/dashboard`),
   pendingClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims`),
+  confirmedClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims?status=confirmed`),
+  revokeClaim: (id: number, claimId: number) => request<void>('POST', `/meetings/${id}/claims/${claimId}/revoke`),
   confirmClaim: (id: number, claimId: number, ownerId: number) =>
     request<void>('POST', `/meetings/${id}/claims/${claimId}/confirm`, { owner_id: ownerId }),
   rejectClaim: (id: number, claimId: number) => request<void>('POST', `/meetings/${id}/claims/${claimId}/reject`),

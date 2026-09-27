@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 
 import { api, ApiError } from '../../api/client';
-import { choiceLabels, type Choice, type Meeting } from '../../api/types';
+import { choiceLabels, type Choice, type Meeting, type OwnerSelection } from '../../api/types';
 import { CancelFlat } from '../../components/CancelFlat';
 import { BottomBar, CheckCircle, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic, shareLink } from '../../lib/bridge';
@@ -11,20 +11,22 @@ import { useNav } from '../../lib/nav';
 const choices: Choice[] = ['for', 'against', 'abstain'];
 
 // Голосование собственника: выбор → подтверждение → «спасибо» → «вы уже проголосовали».
-export function Vote({ id }: { id: number }) {
+export function Vote({ id, selection }: { id: number; selection?: OwnerSelection }) {
   const nav = useNav();
   const { data: meeting, setData, error, reload } = useLoad(() => api.meeting(id), [id]);
   const [picked, setPicked] = useState<Choice | null>(null);
   const [editing, setEditing] = useState(false);
   const [sending, setSending] = useState(false);
   const [thanks, setThanks] = useState<Choice | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const selected = submitted ? undefined : selection;
 
   // Без заявки голосовать нечем — сначала выбор квартиры.
   useEffect(() => {
-    if (meeting && meeting.claims.length === 0 && meeting.status === 'active') {
+    if (meeting && !selected && meeting.claims.length === 0 && meeting.status === 'active') {
       nav.replace({ name: 'pick', id });
     }
-  }, [meeting, id, nav]);
+  }, [meeting, id, nav, selected]);
 
   if (error) return <Failure message={error} onRetry={reload} />;
   if (!meeting) return <Loading />;
@@ -34,15 +36,16 @@ export function Vote({ id }: { id: number }) {
   // Свою подтверждённую квартиру инициатор может снять: подтверждал её он сам.
   const ownConfirmed = meeting.is_initiator ? meeting.claims.filter((c) => c.status === 'confirmed') : [];
   const allPending = meeting.claims.length > 0 && pending.length === meeting.claims.length;
-  const choosing = open && (!meeting.choice || editing);
+  const choosing = open && (!meeting.choice || editing || Boolean(selected));
 
   async function confirm() {
     if (!picked) return;
     setSending(true);
     try {
-      const updated = await api.vote(id, picked);
+      const updated = await api.vote(id, picked, selected);
       haptic.success();
       setData(updated);
+      setSubmitted(true);
       setThanks(picked);
       setEditing(false);
       setPicked(null);
@@ -67,11 +70,19 @@ export function Vote({ id }: { id: number }) {
         <h1 className="h1">{meeting.question}</h1>
         <div className="meta caption">
           <WeightLine meeting={meeting} />
+          {selected && <span>Квартира {selected.flat_number} · {selected.owner_name} · ваша доля {area(selected.weight)}</span>}
           {meeting.ends_at && (
             <span>{open ? 'Голосование до' : 'Голосование завершилось'} {dayTime(meeting.ends_at)}</span>
           )}
         </div>
       </div>
+
+      {selected && <div className="banner"><div className="body">
+        <div className="strong">Квартира и собственник выбраны</div>
+        <div className="caption">{meeting.is_initiator ? 'Голос будет учтён после подтверждения выбора.'
+          : 'Заявка ещё не отправлена. Выберите ответ и подтвердите голос — после этого инициатор проверит вашу долю.'}</div>
+        <button type="button" className="btn link" onClick={() => nav.replace({ name: 'pick', id })}>Изменить собственника</button>
+      </div></div>}
 
       {pending.length > 0 && open && (
         <>
@@ -156,7 +167,7 @@ export function Vote({ id }: { id: number }) {
 
       {picked && choosing && (
         <BottomBar>
-          <button type="button" className="btn primary large" disabled={sending || picked === meeting.choice}
+          <button type="button" className="btn primary large" disabled={sending || (!selected && picked === meeting.choice)}
             onClick={confirm}>
             {sending ? 'Сохраняем…' : 'Подтвердить выбор'}
           </button>
@@ -166,17 +177,16 @@ export function Vote({ id }: { id: number }) {
   );
 }
 
-// «Ваш голос: квартира 14 · 54,2 м²». До подтверждения вес ещё неизвестен —
-// показываем площадь квартиры.
+// Показываем долю выбранного собственника, а не площадь всей квартиры.
 function WeightLine({ meeting }: { meeting: Meeting }) {
   if (meeting.claims.length === 0) return null;
   const numbers = meeting.claims.map((c) => c.flat_number);
-  const weight = meeting.claims.reduce((sum, c) => sum + (c.status === 'confirmed' ? c.weight : c.flat_area), 0);
+  const weight = meeting.claims.reduce((sum, c) => sum + c.weight, 0);
   const label = numbers.length === 1 ? `квартира ${numbers[0]}` : `квартиры ${numbers.join(', ')}`;
   const name = meeting.claims.find((c) => c.owner_name)?.owner_name;
   return (
     <>
-      <span>Ваш голос: {label} · {area(weight)}</span>
+      <span>Ваша доля: {label} · {weight > 0 ? area(weight) : 'уточняется по реестру'}</span>
       {name && <span>По реестру: {shortName(name)}</span>}
     </>
   );

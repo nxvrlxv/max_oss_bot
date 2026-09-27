@@ -1,4 +1,5 @@
 import { createContext, useContext, useRef } from 'react';
+import type { OwnerSelection } from '../api/types';
 
 // Экраны приложения. Навигация — стек в памяти: мини-приложение живёт
 // в одном окне MAX, адресная строка пользователю не видна.
@@ -7,7 +8,7 @@ export type Route =
   | { name: 'join'; token: string } // приглашение из ссылки, QR или кнопки в чате дома
   | { name: 'open'; id: number } // решает, куда вести: инициатора — на дашборд, собственника — к голосованию
   | { name: 'pick'; id: number }
-  | { name: 'vote'; id: number }
+  | { name: 'vote'; id: number; selection?: OwnerSelection }
   | { name: 'create' }
   | { name: 'edit'; id: number }
   | { name: 'setup'; id: number }

@@ -9,12 +9,11 @@ import { useNav } from '../../lib/nav';
 
 // Очередь заявок: человек из MAX против собственников квартиры по реестру.
 export function Claims({ id }: { id: number }) {
-  const { data, setData, error, reload } = useLoad(() => api.pendingClaims(id), [id], 15_000);
+  const [tab, setTab] = useState<'pending' | 'confirmed'>('pending');
+  const { data, error, loading, reload } = useLoad(() => tab === 'pending' ? api.pendingClaims(id) : api.confirmedClaims(id), [id, tab], 15_000);
 
   if (error) return <Failure message={error} onRetry={reload} />;
-  if (!data) return <Loading />;
-
-  const remove = (claimId: number) => setData(data.filter((c) => c.id !== claimId));
+  if (!data || loading) return <Loading />;
 
   return (
     <div className="screen">
@@ -25,11 +24,16 @@ export function Claims({ id }: { id: number }) {
         </div>
       </div>
 
+      <div className="btn-row" style={{ marginBottom: 12 }}>
+        <button className={`btn ${tab === 'pending' ? 'primary' : 'secondary'}`} onClick={() => setTab('pending')}>На проверке</button>
+        <button className={`btn ${tab === 'confirmed' ? 'primary' : 'secondary'}`} onClick={() => setTab('confirmed')}>Подтверждённые</button>
+      </div>
+
       {data.length === 0 ? (
-        <div className="card"><p className="title">Все заявки разобраны</p></div>
+        <div className="card"><p className="title">{tab === 'pending' ? 'Нет заявок на проверке' : 'Нет подтверждённых заявок'}</p></div>
       ) : (
         <div className="stack">
-          {data.map((claim) => <ClaimCard key={claim.id} meetingId={id} claim={claim} onDone={() => remove(claim.id)} />)}
+          {data.map((claim) => <ClaimCard key={`${claim.id}-${claim.status}`} meetingId={id} claim={claim} onDone={reload} />)}
         </div>
       )}
     </div>
@@ -43,8 +47,10 @@ function ClaimCard({ meetingId, claim, onDone }: { meetingId: number; claim: Pen
   // доли с другим ФИО ему не подходят, сервер их и не примет.
   const fits = (name: string) => !claim.confirmed_as || samePerson(claim.confirmed_as, name);
   const free = owners.filter((o) => !o.taken && fits(o.name));
-  const [ownerId, setOwnerId] = useState<number | null>(free.length === 1 ? free[0].id : null);
+  const [ownerId, setOwnerId] = useState<number | null>(free.some((o) => o.id === claim.requested_owner_id)
+    ? claim.requested_owner_id! : free.length === 1 ? free[0].id : null);
   const [busy, setBusy] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   async function act(action: () => Promise<void>) {
     setBusy(true);
@@ -58,6 +64,20 @@ function ClaimCard({ meetingId, claim, onDone }: { meetingId: number; claim: Pen
     }
   }
 
+  if (claim.status === 'confirmed') return (
+    <div className="card">
+      <div className="title">Кв. {claim.flat_number} · {claim.owner_name}</div>
+      <div className="caption">{claim.user_name} в MAX · подтверждённая доля {area(claim.weight)}</div>
+      {revoking ? <>
+        <p className="caption">Отменить подтверждение? Голос по этой доле выйдет из подсчёта, собственник освободится, заявка вернётся на проверку.</p>
+        <div className="btn-row">
+          <button className="btn secondary" disabled={busy} onClick={() => setRevoking(false)}>Оставить</button>
+          <button className="btn danger" disabled={busy} onClick={() => act(() => api.revokeClaim(meetingId, claim.id))}>Отменить подтверждение</button>
+        </div>
+      </> : <button className="btn danger" disabled={busy} onClick={() => setRevoking(true)}>Отменить подтверждение</button>}
+    </div>
+  );
+
   return (
     <div className="card">
       <div className="card-top">
@@ -66,6 +86,7 @@ function ClaimCard({ meetingId, claim, onDone }: { meetingId: number; claim: Pen
       </div>
       <div className="strong" style={{ marginTop: 8 }}>{claim.user_name}</div>
       <div className="caption">в MAX · заявка {dayTime(claim.created_at)}</div>
+      {claim.requested_owner_id && <div className="strong" style={{ marginTop: 8 }}>Выбрал: {claim.owner_name} · доля {area(claim.weight)}</div>}
       {claim.confirmed_as && (
         <div className="caption" style={{ marginTop: 4 }}>Уже подтверждён как «{claim.confirmed_as}»</div>
       )}

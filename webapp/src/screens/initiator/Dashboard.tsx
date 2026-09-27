@@ -95,6 +95,10 @@ export function Dashboard({ id }: { id: number }) {
 
       <MyVoteCard meeting={meeting} onChanged={reload} />
 
+      <button type="button" className="btn secondary" style={{ marginTop: 12 }} onClick={() => nav.go({ name: 'claims', id })}>
+        Заявки и подтверждённые собственники
+      </button>
+
       {open && <div style={{ marginTop: 12 }}><ChatBinding meeting={meeting} onRefresh={reload} /></div>}
 
       {open && meeting.invite_link && (

@@ -50,26 +50,10 @@ func (s *Server) claimFlat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claim, fresh, err := s.store.ClaimFlat(r.Context(), meeting.ID, number, owner)
+	claim, _, err := s.store.ClaimFlat(r.Context(), meeting.ID, number, owner)
 	if err != nil {
 		storeError(w, r, err)
 		return
-	}
-
-	// Уведомление — фоном и только о новой заявке: повторное нажатие
-	// не должно слать инициатору второе сообщение. Себе инициатор не пишет.
-	if fresh && !isInitiator {
-		name := user.Name()
-		if name == "" {
-			name = "собственник без имени в профиле"
-		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := s.notifier.NotifyClaim(ctx, meeting, claim.FlatNumber, name); err != nil {
-				log.Printf("уведомление о заявке %d: %v", claim.ID, err)
-			}
-		}()
 	}
 
 	writeJSON(w, http.StatusOK, claim)
@@ -90,13 +74,15 @@ func (s *Server) cancelClaim(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) vote(w http.ResponseWriter, r *http.Request) {
-	meeting, ok := s.loadMeeting(w, r)
+	meeting, ok := s.visibleMeeting(w, r)
 	if !ok {
 		return
 	}
 
 	var in struct {
-		Choice domain.Choice `json:"choice"`
+		Choice     domain.Choice `json:"choice"`
+		FlatNumber string        `json:"flat_number"`
+		OwnerID    int           `json:"owner_id"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -108,9 +94,24 @@ func (s *Server) vote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Vote(r.Context(), meeting.ID, currentUser(r).ID, in.Choice); err != nil {
+	user := currentUser(r)
+	if (strings.TrimSpace(in.FlatNumber) == "") != (in.OwnerID == 0) {
+		writeError(w, http.StatusBadRequest, "Выберите квартиру и собственника")
+		return
+	}
+	fresh, err := s.store.SubmitVote(r.Context(), meeting.ID, storage.User{MaxID: user.ID, Name: user.Name(), Username: user.Username}, in.Choice, strings.TrimSpace(in.FlatNumber), in.OwnerID)
+	if err != nil {
 		storeError(w, r, err)
 		return
+	}
+	if fresh && meeting.InitiatorID != user.ID {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := s.notifier.NotifyClaim(ctx, meeting, in.FlatNumber, user.Name()); err != nil {
+				log.Printf("уведомление о голосе: %v", err)
+			}
+		}()
 	}
 	s.respondMeeting(w, r, meeting.ID, http.StatusOK)
 }
@@ -186,14 +187,18 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		"not_voted_area": notVotedArea,
 		"pending_claims": pending,
 		// Голоса по неподтверждённым заявкам: в итог не идут, но видно, что люди голосуют.
-		// Площадь — квартир целиком: чья доля, станет ясно при подтверждении.
+		// Площадь — выбранные доли; для старых заявок без собственника она неизвестна.
 		"pending_votes": map[string]any{"count": pendingVotes, "area": pendingArea},
 	})
 }
 
-// flatOwners — собственники квартиры по реестру, чтобы инициатор выбрал себя.
+// flatOwners — выбор собственника участником, имеющим доступ к собранию.
 func (s *Server) flatOwners(w http.ResponseWriter, r *http.Request) {
-	owners, err := s.store.FlatOwners(r.Context(), meetingFrom(r).ID, r.PathValue("number"))
+	meeting, ok := s.visibleMeeting(w, r)
+	if !ok {
+		return
+	}
+	owners, err := s.store.FlatOwners(r.Context(), meeting.ID, r.PathValue("number"))
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -206,7 +211,15 @@ func (s *Server) flatOwners(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pendingClaims(w http.ResponseWriter, r *http.Request) {
-	claims, err := s.store.PendingClaims(r.Context(), meetingFrom(r).ID)
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = storage.ClaimPending
+	}
+	if status != storage.ClaimPending && status != storage.ClaimConfirmed {
+		writeError(w, http.StatusBadRequest, "Некорректный статус заявок")
+		return
+	}
+	claims, err := s.store.ReviewClaims(r.Context(), meetingFrom(r).ID, status)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -215,6 +228,19 @@ func (s *Server) pendingClaims(w http.ResponseWriter, r *http.Request) {
 		claims = []storage.PendingClaim{}
 	}
 	writeJSON(w, http.StatusOK, claims)
+}
+
+func (s *Server) revokeClaim(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathInt(r, "claim")
+	if !ok {
+		writeError(w, http.StatusNotFound, "Заявка не найдена")
+		return
+	}
+	if err := s.store.RevokeClaim(r.Context(), meetingFrom(r).ID, id); err != nil {
+		storeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) confirmClaim(w http.ResponseWriter, r *http.Request) {

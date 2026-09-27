@@ -508,6 +508,9 @@ func TestOnePersonPerAccount(t *testing.T) {
 	if err := db.ConfirmClaim(ctx, meeting.ID, c4.ID, ownerID("4", "Сидорова Анна")); !errors.As(err, &other) {
 		t.Errorf("соседу подтвердили чужое ФИО: %v", err)
 	}
+	if err := db.Vote(ctx, meeting.ID, neighbour.MaxID, domain.ChoiceAgainst); err != nil {
+		t.Fatal(err)
+	}
 	pending, _ := db.PendingClaims(ctx, meeting.ID)
 	if len(pending) != 1 || pending[0].ConfirmedAs != "Петров Пётр" {
 		t.Errorf("очередь не знает, кем уже подтверждён сосед: %+v", pending)
@@ -524,8 +527,8 @@ func TestOnePersonPerAccount(t *testing.T) {
 	if err := db.Vote(ctx, meeting.ID, late.MaxID, domain.ChoiceFor); err != nil {
 		t.Fatal(err)
 	}
-	if count, area, _ := db.PendingVotes(ctx, meeting.ID); count != 1 || area != 80 {
-		t.Errorf("ждут проверки: %d голосов, %v м² — хотели 1 и 80", count, area)
+	if count, area, _ := db.PendingVotes(ctx, meeting.ID); count != 1 || area != 0 {
+		t.Errorf("старая заявка без выбранного собственника: %d голосов, %v м² — хотели 1 и 0", count, area)
 	}
 
 	// Инициатор отменяет свою ошибочную долю: голос уходит, собственник свободен.
