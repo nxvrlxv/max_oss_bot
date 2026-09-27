@@ -249,13 +249,7 @@ func (s *Server) confirmClaim(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Заявка не найдена")
 		return
 	}
-	var in struct {
-		OwnerID int `json:"owner_id"`
-	}
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if err := s.store.ConfirmClaim(r.Context(), meetingFrom(r).ID, claimID, in.OwnerID); err != nil {
+	if err := s.store.ConfirmRequestedClaim(r.Context(), meetingFrom(r).ID, claimID); err != nil {
 		storeError(w, r, err)
 		return
 	}

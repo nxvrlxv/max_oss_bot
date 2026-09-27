@@ -128,21 +128,32 @@ func (s *Store) Registry(ctx context.Context, meetingID int) ([]domain.Unit, []d
 
 // Flat — помещение для выбора в мини-приложении: без ФИО собственников.
 type Flat struct {
-	ID     int     `json:"id"`
-	Number string  `json:"number"`
-	Area   float64 `json:"area"`
+	ID         int     `json:"id"`
+	Number     string  `json:"number"`
+	Area       float64 `json:"area"`
+	FullyVoted bool    `json:"fully_voted"`
 }
 
 // Flats — помещения собрания в порядке реестра.
 func (s *Store) Flats(ctx context.Context, meetingID int) ([]Flat, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, number, area FROM flats WHERE voting_id = $1 ORDER BY id`, meetingID)
+		SELECT f.id, f.number, f.area,
+		       EXISTS (SELECT 1 FROM owners o WHERE o.flat_id = f.id)
+		       AND NOT EXISTS (
+		           SELECT 1 FROM owners o WHERE o.flat_id = f.id AND NOT EXISTS (
+		               SELECT 1 FROM claims c JOIN votes v
+		                 ON v.owner_id = c.owner_id AND v.voting_id = c.voting_id
+		               WHERE c.owner_id = o.id AND c.voting_id = f.voting_id
+		                 AND c.status = 'confirmed' AND c.choice IS NOT NULL AND v.status = 'confirmed'
+		           )
+		       )
+		FROM flats f WHERE f.voting_id = $1 ORDER BY f.id`, meetingID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Flat, error) {
 		var f Flat
-		err := row.Scan(&f.ID, &f.Number, &f.Area)
+		err := row.Scan(&f.ID, &f.Number, &f.Area, &f.FullyVoted)
 		return f, err
 	})
 }

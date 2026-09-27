@@ -75,7 +75,7 @@ export const api = {
   pendingClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims`),
   confirmedClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims?status=confirmed`),
   revokeClaim: (id: number, claimId: number) => request<void>('POST', `/meetings/${id}/claims/${claimId}/revoke`),
-  confirmClaim: (id: number, claimId: number, ownerId: number) =>
-    request<void>('POST', `/meetings/${id}/claims/${claimId}/confirm`, { owner_id: ownerId }),
+  confirmClaim: (id: number, claimId: number) =>
+    request<void>('POST', `/meetings/${id}/claims/${claimId}/confirm`),
   rejectClaim: (id: number, claimId: number) => request<void>('POST', `/meetings/${id}/claims/${claimId}/reject`),
 };

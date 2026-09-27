@@ -56,6 +56,7 @@ export interface Me {
 }
 
 export interface Flat {
+  fully_voted: boolean;
   id: number;
   number: string;
   area: number;

@@ -440,6 +440,27 @@ func (s *Store) ConfirmClaim(ctx context.Context, meetingID, claimID, ownerID in
 	})
 }
 
+// ConfirmRequestedClaim подтверждает только собственника, выбранного участником.
+func (s *Store) ConfirmRequestedClaim(ctx context.Context, meetingID, claimID int) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT id FROM votings WHERE id = $1 FOR UPDATE`, meetingID); err != nil {
+			return err
+		}
+		var ownerID *int
+		err := tx.QueryRow(ctx, `SELECT requested_owner_id FROM claims WHERE id = $1 AND voting_id = $2 AND status = 'pending' AND choice IS NOT NULL FOR UPDATE`, claimID, meetingID).Scan(&ownerID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if ownerID == nil {
+			return ErrInvalid{"В старой заявке не выбран собственник. Отклоните её и попросите участника выбрать себя и проголосовать заново"}
+		}
+		return confirmTx(ctx, tx, meetingID, claimID, *ownerID)
+	})
+}
+
 func confirmTx(ctx context.Context, tx pgx.Tx, meetingID, claimID, ownerID int) error {
 	if _, err := tx.Exec(ctx, `SELECT id FROM votings WHERE id = $1 FOR UPDATE`, meetingID); err != nil {
 		return err
@@ -448,11 +469,12 @@ func confirmTx(ctx context.Context, tx pgx.Tx, meetingID, claimID, ownerID int) 
 		flatID, userID int
 		choice         *string
 		votedAt        *time.Time
+		requestedOwner *int
 	)
 	err := tx.QueryRow(ctx, `
-		SELECT flat_id, user_id, choice, voted_at FROM claims
+		SELECT flat_id, user_id, choice, voted_at, requested_owner_id FROM claims
 		WHERE id = $1 AND voting_id = $2 AND status = 'pending'
-		FOR UPDATE`, claimID, meetingID).Scan(&flatID, &userID, &choice, &votedAt)
+		FOR UPDATE`, claimID, meetingID).Scan(&flatID, &userID, &choice, &votedAt, &requestedOwner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -460,6 +482,9 @@ func confirmTx(ctx context.Context, tx pgx.Tx, meetingID, claimID, ownerID int) 
 		return err
 	}
 
+	if requestedOwner != nil && *requestedOwner != ownerID {
+		return ErrInvalid{"Нельзя изменить собственника в заявке участника"}
+	}
 	var taken bool
 	err = tx.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM claims WHERE owner_id = $2 AND status = 'confirmed')

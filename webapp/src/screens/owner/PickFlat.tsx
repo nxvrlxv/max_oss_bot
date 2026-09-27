@@ -12,7 +12,7 @@ export function PickFlat({ id }: { id: number }) {
   const nav = useNav();
   const { data, error, reload } = useLoad(
     () => Promise.all([api.meeting(id), api.flats(id)]),
-    [id],
+    [id], 10_000,
   );
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -21,9 +21,8 @@ export function PickFlat({ id }: { id: number }) {
 
   const flats = useMemo(() => {
     if (!data) return [];
-    const claimed = new Set(data[0].claims.map((c) => c.flat_number));
     const q = query.trim().toLowerCase();
-    return data[1].filter((f) => !claimed.has(f.number) && (!q || f.number.toLowerCase().startsWith(q)));
+    return data[1].filter((f) => !f.fully_voted && (!q || f.number.toLowerCase().startsWith(q)));
   }, [data, query]);
 
   if (error) return <Failure message={error} onRetry={reload} />;
@@ -43,6 +42,10 @@ export function PickFlat({ id }: { id: number }) {
 
   async function submit() {
     if (!selected) return;
+    if (meeting.claims.some((c) => c.flat_number === selected)) {
+      nav.replace({ name: 'vote', id });
+      return;
+    }
     setSending(true);
     try {
       setOwners(await api.flatOwners(id, selected));
@@ -100,12 +103,12 @@ export function PickFlat({ id }: { id: number }) {
           </button>
         ))}
       </div>
-      {flats.length === 0 && <p className="caption" style={{ padding: '8px 28px' }}>Такого номера в реестре нет</p>}
+      {flats.length === 0 && <p className="caption" style={{ padding: '8px 28px' }}>Нет доступных помещений: проверьте номер. Квартиры, где голоса всех собственников подтверждены, скрыты.</p>}
 
       {chosen && (
         <BottomBar hint={`Кв. ${chosen.number} · ${area(chosen.area)}`}>
           <button type="button" className="btn primary large" disabled={sending} onClick={submit}>
-            {sending ? 'Секунду…' : 'Выбрать собственника'}
+            {sending ? 'Секунду…' : meeting.claims.some((c) => c.flat_number === chosen.number) ? 'Моя заявка и голос' : 'Выбрать собственника'}
           </button>
         </BottomBar>
       )}

@@ -56,7 +56,8 @@ func TestNeighbourSelectionAndRevoke(t *testing.T) {
 	if status, _ := voter.do("POST", claimPath+"/confirm", map[string]int{"owner_id": owners[0].ID}); status != 404 {
 		t.Fatal("voter confirmed self")
 	}
-	if status, body := initiator.do("POST", claimPath+"/confirm", map[string]int{"owner_id": owners[0].ID}); status != 204 {
+	// Старый клиент не может подменить выбор участника своим owner_id.
+	if status, body := initiator.do("POST", claimPath+"/confirm", map[string]int{"owner_id": owners[1].ID}); status != 204 {
 		t.Fatalf("confirm: %d %v", status, body)
 	}
 	_, board := initiator.do("GET", path+"/dashboard", nil)
@@ -75,5 +76,12 @@ func TestNeighbourSelectionAndRevoke(t *testing.T) {
 	_, board = initiator.do("GET", path+"/dashboard", nil)
 	if board["tally"].(map[string]any)["total"] != float64(0) || board["pending_claims"] != float64(1) {
 		t.Fatalf("revoke tally: %v", board)
+	}
+	if status, body := initiator.do("POST", claimPath+"/confirm", nil); status != 204 {
+		t.Fatalf("confirm without owner input: %d %v", status, body)
+	}
+	_, board = initiator.do("GET", path+"/dashboard", nil)
+	if board["tally"].(map[string]any)["total"] != float64(30) {
+		t.Fatalf("owner changed on reconfirm: %v", board)
 	}
 }
