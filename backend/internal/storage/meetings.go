@@ -213,12 +213,15 @@ func (s *Store) meetings(ctx context.Context, query string, args ...any) ([]Meet
 func (s *Store) BindChat(ctx context.Context, meetingID int, chatID, initiatorMaxID int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var houseID int
+		var existingChat int64
+		var address string
 		err := tx.QueryRow(ctx, `
-			SELECT v.house_id
+			SELECT v.house_id, COALESCE(h.chat_id, 0), h.address
 			FROM votings v
 			JOIN users u ON u.id = v.initiator_user_id
+			JOIN houses h ON h.id = v.house_id
 			WHERE v.id = $1 AND u.max_id = $2
-			FOR UPDATE OF v`, meetingID, initiatorMaxID).Scan(&houseID)
+			FOR UPDATE OF v, h`, meetingID, initiatorMaxID).Scan(&houseID, &existingChat, &address)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -226,8 +229,12 @@ func (s *Store) BindChat(ctx context.Context, meetingID int, chatID, initiatorMa
 			return err
 		}
 
+		if existingChat != 0 && existingChat != chatID {
+			return ErrInvalid{"Собрание уже привязано к другому чату"}
+		}
 		var chatHouseID int
-		err = tx.QueryRow(ctx, `SELECT id FROM houses WHERE chat_id = $1`, chatID).Scan(&chatHouseID)
+		var chatAddress string
+		err = tx.QueryRow(ctx, `SELECT id, address FROM houses WHERE chat_id = $1`, chatID).Scan(&chatHouseID, &chatAddress)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			_, err = tx.Exec(ctx, `UPDATE houses SET chat_id = $1 WHERE id = $2`, chatID, houseID)
@@ -236,6 +243,9 @@ func (s *Store) BindChat(ctx context.Context, meetingID int, chatID, initiatorMa
 			return err
 		case chatHouseID == houseID:
 			return nil // повторное нажатие той же кнопки
+		}
+		if !strings.EqualFold(strings.Join(strings.Fields(address), " "), strings.Join(strings.Fields(chatAddress), " ")) {
+			return ErrInvalid{"Этот чат привязан к другому адресу. Проверьте адрес собрания и отправьте команду в нужный чат"}
 		}
 
 		if _, err := tx.Exec(ctx,

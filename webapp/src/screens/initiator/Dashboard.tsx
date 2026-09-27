@@ -5,6 +5,7 @@ import { choiceLabels, type Meeting, type Threshold } from '../../api/types';
 import { CancelFlat } from '../../components/CancelFlat';
 import { DeleteMeeting } from '../../components/DeleteMeeting';
 import { InviteCard } from '../../components/InviteCard';
+import { ChatBinding } from '../../components/ChatBinding';
 import { Badge, BottomBar, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, plural, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
@@ -93,6 +94,8 @@ export function Dashboard({ id }: { id: number }) {
       )}
 
       <MyVoteCard meeting={meeting} onChanged={reload} />
+
+      {open && <div style={{ marginTop: 12 }}><ChatBinding meeting={meeting} onRefresh={reload} /></div>}
 
       {open && meeting.invite_link && (
         <div style={{ marginTop: 12 }}>
@@ -253,4 +256,3 @@ function Check({ passed, progress, title, caption }: { passed: boolean; progress
     </div>
   );
 }
-

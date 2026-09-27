@@ -3,6 +3,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { api, ApiError } from '../../api/client';
 import type { Meeting, RegistryReport } from '../../api/types';
 import { DeleteMeeting } from '../../components/DeleteMeeting';
+import { ChatBinding } from '../../components/ChatBinding';
 import { BottomBar, CheckCircle, Failure, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic } from '../../lib/bridge';
 import { area, dayTime, plural } from '../../lib/format';
@@ -40,9 +41,10 @@ export function Setup({ id }: { id: number }) {
   async function publish() {
     setPublishing(true);
     try {
-      await api.publish(id);
+      const published = await api.publish(id);
       haptic.success();
       nav.reset({ name: 'dashboard', id });
+      if (published.delivery_warning) nav.showNotice(published.delivery_warning);
     } catch (err) {
       nav.showError(err instanceof ApiError ? err.message : 'Не удалось опубликовать');
       setPublishing(false);
@@ -112,22 +114,7 @@ export function Setup({ id }: { id: number }) {
 
       <div className="gap" />
       <SectionTitle>Домовой чат</SectionTitle>
-      <Step done={meeting.chat_bound}>
-        {meeting.chat_bound ? (
-          <>
-            <div className="strong">Чат привязан</div>
-            <div className="caption">После публикации бот отправит туда вопрос с кнопкой «Проголосовать»</div>
-          </>
-        ) : (
-          <>
-            <div className="strong">Необязательно</div>
-            <div className="caption">
-              Добавьте бота в чат дома и выберите это собрание — вопрос опубликуется туда автоматически.
-              Без чата разошлите ссылку на бота соседям сами.
-            </div>
-          </>
-        )}
-      </Step>
+      <ChatBinding meeting={meeting} onRefresh={reload} />
 
       <div style={{ padding: '0 12px' }}>
         <DeleteMeeting meeting={meeting} />

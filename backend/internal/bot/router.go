@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"time"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
 	"github.com/max-messenger/max-bot-api-client-go/schemes"
@@ -116,13 +118,26 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 	}
 
 	// В групповом чате команда может прийти как «/status@имя_бота» или с аргументами.
-	command, _, _ := strings.Cut(content, " ")
+	command := strings.Fields(content)[0]
 	command, _, _ = strings.Cut(command, "@")
 
 	// По логу инициатор узнаёт свой max_id — он нужен для seed.
 	log.Printf("%s от пользователя %d в чате %d", command, upd.Message.Sender.UserId, upd.GetChatID())
 
 	switch command {
+	case "/bind":
+		if string(upd.Message.Recipient.ChatType) != "chat" {
+			return b.send(ctx, upd.GetChatID(), "Отправьте команду привязки в групповой чат дома, куда добавлен бот.", nil)
+		}
+		parts := strings.Fields(content)
+		if len(parts) != 2 {
+			return b.send(ctx, upd.GetChatID(), "Скопируйте команду /bind с номером из раздела «Домовой чат» нужного собрания.", nil)
+		}
+		id, err := strconv.Atoi(parts[1])
+		if err != nil || id <= 0 {
+			return b.send(ctx, upd.GetChatID(), "Некорректный номер собрания.", nil)
+		}
+		return b.bindMeeting(ctx, id, upd.GetChatID(), upd.Message.Sender.UserId)
 	case "/start":
 		return b.sendMainMenu(ctx, upd.GetChatID())
 	case "/init_sobr":
@@ -136,29 +151,46 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 	}
 }
 
-// onBotAdded — бота добавили в домовой чат. Предлагаем тому, кто добавил,
-// привязать чат к одному из его собраний: без привязки боту некуда публиковать.
+// onBotAdded объясняет адресную привязку, не раскрывая в группе список собраний.
 func (b *Bot) onBotAdded(ctx context.Context, upd *schemes.BotAddedToChatUpdate) error {
-	meetings, err := b.store.MeetingsByInitiator(ctx, upd.User.UserId)
-	if err != nil {
-		return fmt.Errorf("собрания пользователя %d: %w", upd.User.UserId, err)
-	}
-
-	if len(meetings) == 0 {
-		kb := b.api.Messages.NewKeyboardBuilder()
-		kb.AddRow().AddOpenApp("Создать собрание", b.app, Format(ActionNew, 0), 0)
-
-		return b.send(ctx, upd.ChatId,
-			"Готов помочь с собранием собственников. Сначала создайте собрание, "+
-				"потом вернитесь сюда и привяжите к нему этот чат.", kb)
-	}
-
 	kb := b.api.Messages.NewKeyboardBuilder()
-	for _, meeting := range meetings {
-		kb.AddRow().AddCallback(label(meeting), schemes.DEFAULT, Format(ActionBind, meeting.ID))
-	}
+	kb.AddRow().AddOpenApp("Мои собрания", b.app, Format(ActionList, 0), 0)
+	return b.send(ctx, upd.ChatId, "Готов помочь с собранием собственников. Откройте нужное собрание, скопируйте команду из раздела «Домовой чат» и отправьте её сюда. Для каждого нового собрания используйте его команду — повторно добавлять бота не нужно.", kb)
+}
 
-	return b.send(ctx, upd.ChatId, "К какому собранию привязать этот чат?", kb)
+func (b *Bot) bindMeeting(ctx context.Context, id int, chatID, userID int64) error {
+	meeting, err := b.store.Meeting(ctx, id)
+	if errors.Is(err, storage.ErrNotFound) || (err == nil && meeting.InitiatorID != userID) {
+		return b.send(ctx, chatID, "Собрание не найдено или вы не его инициатор.", nil)
+	}
+	if err != nil {
+		return err
+	}
+	if meeting.Closed(time.Now()) {
+		return b.send(ctx, chatID, "Голосование уже завершено.", nil)
+	}
+	if meeting.ChatID != 0 && meeting.ChatID != chatID {
+		return b.send(ctx, chatID, "Собрание уже привязано к другому чату.", nil)
+	}
+	if err := b.store.BindChat(ctx, id, chatID, userID); err != nil {
+		var invalid storage.ErrInvalid
+		if errors.As(err, &invalid) {
+			return b.send(ctx, chatID, invalid.Reason, nil)
+		}
+		return err
+	}
+	meeting, err = b.store.Meeting(ctx, id)
+	if err != nil {
+		return err
+	}
+	if meeting.Inviting(time.Now()) {
+		if err := NewNotifier(b.api, b.app).AnnounceMeeting(ctx, meeting); err != nil {
+			log.Printf("объявление собрания %d в чат %d: %v", id, chatID, err)
+			return b.send(ctx, chatID, "Чат привязан, но объявление отправить не удалось. Повторите команду /bind с номером собрания.", nil)
+		}
+		return nil
+	}
+	return b.send(ctx, chatID, fmt.Sprintf("Чат привязан: %s\n%s\n\nПосле публикации бот отправит сюда вопрос, ссылку и QR-код.", meeting.Address, meeting.Question), nil)
 }
 
 // label — подпись кнопки: вопрос собрания, обрезанный до читаемой длины.
@@ -189,31 +221,17 @@ func (b *Bot) onCallback(ctx context.Context, upd *schemes.MessageCallbackUpdate
 
 	switch payload.Action {
 	case ActionBind:
-		if upd.Message == nil {
+		if upd.Message == nil || string(upd.Message.Recipient.ChatType) != "chat" {
 			return nil
 		}
-		chatID := upd.Message.Recipient.ChatId
-
-		err := b.store.BindChat(ctx, payload.ID, chatID, upd.Callback.User.UserId)
-		if errors.Is(err, storage.ErrNotFound) {
-			return b.send(ctx, chatID, "Привязать чат может только инициатор собрания.", nil)
-		}
-		if err != nil {
-			return fmt.Errorf("привязка чата %d к собранию %d: %w", chatID, payload.ID, err)
-		}
-
-		meeting, err := b.store.Meeting(ctx, payload.ID)
-		if err != nil {
-			return fmt.Errorf("собрание %d: %w", payload.ID, err)
-		}
-
-		// Отправляем без клавиатуры: привязка уже сделана,
-		// повторное нажатие той же кнопки ничего не даст.
-		return b.send(ctx, chatID,
-			fmt.Sprintf("Чат привязан к собранию: %s\n\nКогда опубликуете вопрос, "+
-				"уведомление придёт сюда.", label(meeting)), nil)
+		return b.bindMeeting(ctx, payload.ID, upd.Message.Recipient.ChatId, upd.Callback.User.UserId)
 
 	case ActionList:
+		if upd.Message != nil && upd.Message.Recipient.ChatType != schemes.DIALOG {
+			kb := b.api.Messages.NewKeyboardBuilder()
+			kb.AddRow().AddOpenApp("Мои собрания", b.app, Format(ActionList, 0), 0)
+			return b.send(ctx, upd.Message.Recipient.ChatId, "Выберите нужное собрание в приложении.", kb)
+		}
 		meetings, err := b.store.MeetingsByInitiator(ctx, upd.Callback.User.UserId)
 		if err != nil {
 			return fmt.Errorf("собрания пользователя %d: %w", upd.Callback.User.UserId, err)

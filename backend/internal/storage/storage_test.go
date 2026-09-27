@@ -141,6 +141,12 @@ func TestBindChat(t *testing.T) {
 	if a.HouseID != b.HouseID || b.ChatID != chat {
 		t.Errorf("собрания в разных домах: %+v / %+v", a, b)
 	}
+	if err := db.BindChat(ctx, second.ID, 777, 10); err == nil {
+		t.Fatal("повторная привязка перенесла общий дом в другой чат")
+	}
+	if unchanged, _ := db.Meeting(ctx, first.ID); unchanged.ChatID != chat {
+		t.Fatal("изменился чат другого собрания")
+	}
 	var houses int
 	_ = db.pool.QueryRow(ctx, `SELECT count(*) FROM houses`).Scan(&houses)
 	if houses != 1 {
@@ -150,6 +156,18 @@ func TestBindChat(t *testing.T) {
 	found, err := db.MeetingsByChat(ctx, chat)
 	if err != nil || len(found) != 2 {
 		t.Errorf("собраний в чате %d, %v — хотели 2", len(found), err)
+	}
+	other, err := db.CreateMeeting(ctx, NewMeeting{
+		InitiatorMaxID: 10, Address: "Другой дом", Question: "Другой вопрос", Rule: domain.RuleSoft(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindChat(ctx, other.ID, chat, 10); err == nil {
+		t.Fatal("собрание другого дома привязалось к занятому чату")
+	}
+	if unchanged, _ := db.Meeting(ctx, other.ID); unchanged.ChatID != 0 || unchanged.Address != "Другой дом" {
+		t.Fatal("отклонённая привязка изменила собрание")
 	}
 
 	if err := db.UnbindChat(ctx, chat); err != nil {

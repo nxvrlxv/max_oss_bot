@@ -115,6 +115,7 @@ func (b *Bot) SetCommands(ctx context.Context) error {
 			{Name: "start", Description: "Начать работу"},
 			{Name: "init_sobr", Description: "Создать собрание"},
 			{Name: "status", Description: "Статус собрания"},
+			{Name: "bind", Description: "Привязать собрание: /bind номер"},
 		},
 	})
 	return err

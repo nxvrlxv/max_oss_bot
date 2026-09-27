@@ -65,24 +65,25 @@ type summaryView struct {
 }
 
 type meetingView struct {
-	ID          int             `json:"id"`
-	Question    string          `json:"question"`
-	Address     string          `json:"address"`
-	Status      string          `json:"status"` // с учётом истёкшего срока
-	StartsAt    *time.Time      `json:"starts_at,omitempty"`
-	EndsAt      *time.Time      `json:"ends_at,omitempty"`
-	Rule        ruleView        `json:"rule"`
-	TotalArea   float64         `json:"total_area"`        // 0, пока реестр не загружен
-	AreaSource  string          `json:"total_area_source"` // registry или manual
-	IsInitiator bool            `json:"is_initiator"`
-	ChatBound   bool            `json:"chat_bound"`
-	InviteLink  string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
-	InviteQR    string          `json:"invite_qr,omitempty"`   // адрес картинки с той же ссылкой — для объявления в подъезде
-	Claims      []storage.Claim `json:"claims"`
-	Choice      domain.Choice   `json:"choice,omitempty"`
-	VotedAt     *time.Time      `json:"voted_at,omitempty"`
-	Registry    *registryView   `json:"registry,omitempty"`
-	Summary     *summaryView    `json:"summary,omitempty"`
+	ID              int             `json:"id"`
+	Question        string          `json:"question"`
+	Address         string          `json:"address"`
+	Status          string          `json:"status"` // с учётом истёкшего срока
+	StartsAt        *time.Time      `json:"starts_at,omitempty"`
+	EndsAt          *time.Time      `json:"ends_at,omitempty"`
+	Rule            ruleView        `json:"rule"`
+	TotalArea       float64         `json:"total_area"`        // 0, пока реестр не загружен
+	AreaSource      string          `json:"total_area_source"` // registry или manual
+	IsInitiator     bool            `json:"is_initiator"`
+	ChatBound       bool            `json:"chat_bound"`
+	DeliveryWarning string          `json:"delivery_warning,omitempty"`
+	InviteLink      string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
+	InviteQR        string          `json:"invite_qr,omitempty"`   // адрес картинки с той же ссылкой — для объявления в подъезде
+	Claims          []storage.Claim `json:"claims"`
+	Choice          domain.Choice   `json:"choice,omitempty"`
+	VotedAt         *time.Time      `json:"voted_at,omitempty"`
+	Registry        *registryView   `json:"registry,omitempty"`
+	Summary         *summaryView    `json:"summary,omitempty"`
 }
 
 // view собирает собрание глазами конкретного человека.
@@ -388,11 +389,24 @@ func (s *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Публикация в чат — не повод откатывать собрание: ссылку можно разослать руками.
+	warning := ""
 	if err := s.notifier.AnnounceMeeting(r.Context(), meeting); err != nil {
 		log.Printf("публикация собрания %d в чат %d: %v", meeting.ID, meeting.ChatID, err)
+		warning = "Собрание опубликовано, но сообщение в чат не доставлено. Отправьте команду из раздела «Домовой чат», чтобы повторить отправку."
 	}
 
-	s.respondMeeting(w, r, meeting.ID, http.StatusOK)
+	updated, err := s.store.Meeting(r.Context(), meeting.ID)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	view, err := s.view(r, updated, true)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	view.DeliveryWarning = warning
+	writeJSON(w, http.StatusOK, view)
 }
 
 // deleteMeeting удаляет собрание со всеми голосами. Если голосование шло

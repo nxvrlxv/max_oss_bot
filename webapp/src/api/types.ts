@@ -38,6 +38,7 @@ export interface Meeting {
   total_area_source: 'registry' | 'manual';
   is_initiator: boolean;
   chat_bound: boolean;
+  delivery_warning?: string;
   invite_link?: string;
   invite_qr?: string; // адрес картинки QR с той же ссылкой — для объявления в подъезде
   claims: Claim[];
