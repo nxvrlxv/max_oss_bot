@@ -79,7 +79,7 @@ func (m *NewMeeting) validate() error {
 }
 
 const meetingSelect = `
-	SELECT v.id, u.max_id, COALESCE(h.chat_id, 0), h.id, h.address,
+	SELECT v.id, u.max_id, COALESCE(v.chat_id, 0), h.id, h.address,
 	       v.question, v.rule_json, COALESCE(v.total_area, 0), v.total_area_source,
 	       v.invite_token, v.status, v.starts_at, v.ends_at
 	FROM votings v
@@ -181,7 +181,7 @@ func (s *Store) MeetingsForUser(ctx context.Context, maxID int64) ([]Meeting, er
 // MeetingsByChat — незавершённые собрания дома, привязанного к чату.
 func (s *Store) MeetingsByChat(ctx context.Context, chatID int64) ([]Meeting, error) {
 	return s.meetings(ctx, meetingSelect+`
-		WHERE h.chat_id = $1 AND v.status <> 'finished'
+		WHERE v.chat_id = $1 AND v.status <> 'finished'
 		ORDER BY v.id DESC
 		LIMIT 10`, chatID)
 }
@@ -207,21 +207,16 @@ func (s *Store) meetings(ctx context.Context, query string, args ...any) ([]Meet
 // BindChat привязывает домовой чат к собранию. Привязать может только
 // инициатор: иначе поддельный callback отправит чужое собрание в чужой чат.
 //
-// Ключ дома — chat_id. Если чат уже привязан к другому дому, собрание
-// переезжает в него, а опустевший дом удаляется: второе собрание
-// в том же чате — это тот же дом.
+// Привязка не объединяет дома и не меняет адреса других собраний.
 func (s *Store) BindChat(ctx context.Context, meetingID int, chatID, initiatorMaxID int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var houseID int
 		var existingChat int64
-		var address string
 		err := tx.QueryRow(ctx, `
-			SELECT v.house_id, COALESCE(h.chat_id, 0), h.address
+			SELECT COALESCE(v.chat_id, 0)
 			FROM votings v
 			JOIN users u ON u.id = v.initiator_user_id
-			JOIN houses h ON h.id = v.house_id
 			WHERE v.id = $1 AND u.max_id = $2
-			FOR UPDATE OF v, h`, meetingID, initiatorMaxID).Scan(&houseID, &existingChat, &address)
+			FOR UPDATE OF v`, meetingID, initiatorMaxID).Scan(&existingChat)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -232,37 +227,14 @@ func (s *Store) BindChat(ctx context.Context, meetingID int, chatID, initiatorMa
 		if existingChat != 0 && existingChat != chatID {
 			return ErrInvalid{"Собрание уже привязано к другому чату"}
 		}
-		var chatHouseID int
-		var chatAddress string
-		err = tx.QueryRow(ctx, `SELECT id, address FROM houses WHERE chat_id = $1`, chatID).Scan(&chatHouseID, &chatAddress)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			_, err = tx.Exec(ctx, `UPDATE houses SET chat_id = $1 WHERE id = $2`, chatID, houseID)
-			return err
-		case err != nil:
-			return err
-		case chatHouseID == houseID:
-			return nil // повторное нажатие той же кнопки
-		}
-		if !strings.EqualFold(strings.Join(strings.Fields(address), " "), strings.Join(strings.Fields(chatAddress), " ")) {
-			return ErrInvalid{"Этот чат привязан к другому адресу. Проверьте адрес собрания и отправьте команду в нужный чат"}
-		}
-
-		if _, err := tx.Exec(ctx,
-			`UPDATE votings SET house_id = $1 WHERE id = $2`, chatHouseID, meetingID); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `
-			DELETE FROM houses h
-			WHERE h.id = $1 AND NOT EXISTS (SELECT 1 FROM votings WHERE house_id = h.id)`,
-			houseID)
+		_, err = tx.Exec(ctx, `UPDATE votings SET chat_id = $1 WHERE id = $2`, chatID, meetingID)
 		return err
 	})
 }
 
 // UnbindChat — бота удалили из чата: публиковать туда больше некуда.
 func (s *Store) UnbindChat(ctx context.Context, chatID int64) error {
-	_, err := s.pool.Exec(ctx, `UPDATE houses SET chat_id = NULL WHERE chat_id = $1`, chatID)
+	_, err := s.pool.Exec(ctx, `UPDATE votings SET chat_id = NULL WHERE chat_id = $1`, chatID)
 	return err
 }
 
@@ -425,8 +397,7 @@ func (s *Store) Finish(ctx context.Context, meetingID int) error {
 // DeleteMeeting удаляет собрание вместе с реестром, заявками и голосами —
 // всё уходит каскадом от votings. Удалить может только инициатор.
 // Завершённое собрание не удаляется: его итог — основание для протокола.
-// Опустевший дом без привязанного чата удаляется тоже; дом с чатом
-// остаётся — в том же чате будут следующие собрания.
+// Опустевшая запись дома удаляется, привязки остальных собраний сохраняются.
 func (s *Store) DeleteMeeting(ctx context.Context, meetingID int, initiatorMaxID int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var (
@@ -458,7 +429,7 @@ func (s *Store) DeleteMeeting(ctx context.Context, meetingID int, initiatorMaxID
 
 		_, err = tx.Exec(ctx, `
 			DELETE FROM houses h
-			WHERE h.id = $1 AND h.chat_id IS NULL
+			WHERE h.id = $1
 			  AND NOT EXISTS (SELECT 1 FROM votings WHERE house_id = h.id)`, houseID)
 		return err
 	})

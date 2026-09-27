@@ -83,6 +83,46 @@ func TestMigrateTwice(t *testing.T) {
 	}
 }
 
+func TestMigrateMeetingChat(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	first, second, unbound := newMeeting(t, db, 10), newMeeting(t, db, 10), newMeeting(t, db, 10)
+	// В старой схеме несколько собраний могли ссылаться на общий дом.
+	if _, err := db.pool.Exec(ctx, `UPDATE votings SET house_id = $1 WHERE id = $2`, first.HouseID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `UPDATE houses SET chat_id = 555 WHERE id = $1`, first.HouseID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.pool.Exec(ctx, `ALTER TABLE votings DROP COLUMN chat_id;
+		DELETE FROM schema_migrations WHERE version = '005_meeting_chat.sql'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int{first.ID, second.ID} {
+		meeting, err := db.Meeting(ctx, id)
+		if err != nil || meeting.ChatID != 555 {
+			t.Fatalf("lost legacy binding: %+v, %v", meeting, err)
+		}
+	}
+	meeting, err := db.Meeting(ctx, unbound.ID)
+	if err != nil || meeting.ChatID != 0 {
+		t.Fatalf("unexpected binding: %+v, %v", meeting, err)
+	}
+	if err := db.UnbindChat(ctx, 555); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	meeting, err = db.Meeting(ctx, first.ID)
+	if err != nil || meeting.ChatID != 0 {
+		t.Fatalf("migration restored a removed binding: %+v, %v", meeting, err)
+	}
+}
+
 func TestUsersAndDialogs(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
@@ -132,14 +172,14 @@ func TestBindChat(t *testing.T) {
 		}
 	}
 
-	// Второе собрание в том же чате — тот же дом.
+	// Второе собрание использует тот же чат, сохраняя собственную запись дома.
 	if err := db.BindChat(ctx, second.ID, chat, 10); err != nil {
 		t.Fatal(err)
 	}
 	a, _ := db.Meeting(ctx, first.ID)
 	b, _ := db.Meeting(ctx, second.ID)
-	if a.HouseID != b.HouseID || b.ChatID != chat {
-		t.Errorf("собрания в разных домах: %+v / %+v", a, b)
+	if a.HouseID != first.HouseID || b.HouseID != second.HouseID || b.ChatID != chat {
+		t.Errorf("привязка изменила дома: %+v / %+v", a, b)
 	}
 	if err := db.BindChat(ctx, second.ID, 777, 10); err == nil {
 		t.Fatal("повторная привязка перенесла общий дом в другой чат")
@@ -149,8 +189,8 @@ func TestBindChat(t *testing.T) {
 	}
 	var houses int
 	_ = db.pool.QueryRow(ctx, `SELECT count(*) FROM houses`).Scan(&houses)
-	if houses != 1 {
-		t.Errorf("домов %d, опустевший дом должен удалиться", houses)
+	if houses != 2 {
+		t.Errorf("домов %d, привязка не должна объединять дома", houses)
 	}
 
 	found, err := db.MeetingsByChat(ctx, chat)
@@ -163,11 +203,14 @@ func TestBindChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindChat(ctx, other.ID, chat, 10); err == nil {
-		t.Fatal("собрание другого дома привязалось к занятому чату")
+	if err := db.BindChat(ctx, other.ID, chat, 10); err != nil {
+		t.Fatal(err)
 	}
-	if unchanged, _ := db.Meeting(ctx, other.ID); unchanged.ChatID != 0 || unchanged.Address != "Другой дом" {
-		t.Fatal("отклонённая привязка изменила собрание")
+	if unchanged, _ := db.Meeting(ctx, other.ID); unchanged.ChatID != chat || unchanged.Address != "Другой дом" {
+		t.Fatal("привязка изменила адрес собрания")
+	}
+	if unchanged, _ := db.Meeting(ctx, first.ID); unchanged.Address != first.Address || unchanged.ChatID != chat {
+		t.Fatal("привязка изменила старое собрание")
 	}
 
 	if err := db.UnbindChat(ctx, chat); err != nil {
@@ -659,19 +702,21 @@ func TestDeleteMeeting(t *testing.T) {
 		t.Error("вместе с собранием удалились пользователи")
 	}
 
-	// Дом с чатом остаётся для следующих собраний.
+	// Удаление собрания не затрагивает привязку другого собрания в том же чате.
 	first, second := newMeeting(t, db, 10), newMeeting(t, db, 10)
 	_ = db.BindChat(ctx, first.ID, 777, 10)
 	_ = db.BindChat(ctx, second.ID, 777, 10)
 	if err := db.DeleteMeeting(ctx, first.ID, 10); err != nil {
 		t.Fatal(err)
 	}
+	if remaining, err := db.Meeting(ctx, second.ID); err != nil || remaining.ChatID != 777 {
+		t.Fatalf("потеряна привязка второго собрания: %+v, %v", remaining, err)
+	}
 	if err := db.DeleteMeeting(ctx, second.ID, 10); err != nil {
 		t.Fatal(err)
 	}
-	var chat int64
-	if err := db.pool.QueryRow(ctx, `SELECT chat_id FROM houses`).Scan(&chat); err != nil || chat != 777 {
-		t.Errorf("дом с чатом удалился: %v, %v", chat, err)
+	if count("houses") != 0 {
+		t.Error("остались пустые дома")
 	}
 
 	// Завершённое — явно или по сроку — удалить нельзя.

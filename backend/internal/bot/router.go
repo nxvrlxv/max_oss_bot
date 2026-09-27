@@ -112,6 +112,10 @@ func (b *Bot) send(ctx context.Context, chatID int64, text string, kb *maxbot.Ke
 
 func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) error {
 	content := strings.TrimSpace(upd.Message.Body.Text)
+	// MAX может прислать текст с явным упоминанием перед командой.
+	if parts := strings.Fields(content); len(parts) > 1 && b.app != "" && strings.EqualFold(parts[0], "@"+b.app) {
+		content = strings.Join(parts[1:], " ")
+	}
 
 	if !strings.HasPrefix(content, "/") {
 		return nil
@@ -119,7 +123,10 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 
 	// В групповом чате команда может прийти как «/status@имя_бота» или с аргументами.
 	command := strings.Fields(content)[0]
-	command, _, _ = strings.Cut(command, "@")
+	command, target, targeted := strings.Cut(command, "@")
+	if targeted && !strings.EqualFold(target, b.app) {
+		return nil
+	}
 
 	// По логу инициатор узнаёт свой max_id — он нужен для seed.
 	log.Printf("%s от пользователя %d в чате %d", command, upd.Message.Sender.UserId, upd.GetChatID())
@@ -137,7 +144,11 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 		if err != nil || id <= 0 {
 			return b.send(ctx, upd.GetChatID(), "Некорректный номер собрания.", nil)
 		}
-		return b.bindMeeting(ctx, id, upd.GetChatID(), upd.Message.Sender.UserId)
+		if err := b.bindMeeting(ctx, id, upd.GetChatID(), upd.Message.Sender.UserId); err != nil {
+			log.Printf("привязка собрания %d в чат %d: %v", id, upd.GetChatID(), err)
+			return b.send(ctx, upd.GetChatID(), "Не удалось привязать собрание из-за ошибки сервиса. Попробуйте ещё раз. Если ошибка повторяется, передайте администратору номер собрания.", nil)
+		}
+		return nil
 	case "/start":
 		return b.sendMainMenu(ctx, upd.GetChatID())
 	case "/init_sobr":
@@ -155,7 +166,7 @@ func (b *Bot) onMessage(ctx context.Context, upd *schemes.MessageCreatedUpdate) 
 func (b *Bot) onBotAdded(ctx context.Context, upd *schemes.BotAddedToChatUpdate) error {
 	kb := b.api.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddOpenApp("Мои собрания", b.app, Format(ActionList, 0), 0)
-	return b.send(ctx, upd.ChatId, "Готов помочь с собранием собственников. Откройте нужное собрание, скопируйте команду из раздела «Домовой чат» и отправьте её сюда. Для каждого нового собрания используйте его команду — повторно добавлять бота не нужно.", kb)
+	return b.send(ctx, upd.ChatId, "Готов помочь с собранием собственников. Назначьте меня администратором с правом чтения сообщений, чтобы я получал команды из этого чата. Затем откройте нужное собрание, скопируйте команду из раздела «Домовой чат» и отправьте её сюда. Для каждого нового собрания используйте его команду — повторно добавлять бота не нужно.", kb)
 }
 
 func (b *Bot) bindMeeting(ctx context.Context, id int, chatID, userID int64) error {

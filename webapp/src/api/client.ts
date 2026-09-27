@@ -18,7 +18,7 @@ export function rememberInvite(meetingId: number, token: string) {
   invites.set(meetingId, token);
 }
 
-async function request<T>(method: string, path: string, body?: unknown, contentType = 'application/json'): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, contentType = 'application/json', signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { 'X-Max-Init-Data': initData() };
   const meetingId = Number(path.match(/^\/meetings\/(\d+)/)?.[1]);
   const invite = invites.get(meetingId);
@@ -34,7 +34,7 @@ async function request<T>(method: string, path: string, body?: unknown, contentT
 
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, { method, headers, body: payload });
+    response = await fetch(`/api${path}`, { method, headers, body: payload, signal });
   } catch {
     throw new ApiError('Нет соединения. Проверьте интернет и попробуйте ещё раз', 0);
   }
@@ -51,7 +51,7 @@ async function request<T>(method: string, path: string, body?: unknown, contentT
 export const api = {
   me: () => request<Me>('GET', '/me'),
   join: (token: string) => request<{ id: number }>('GET', `/join/${token}`),
-  meeting: (id: number) => request<Meeting>('GET', `/meetings/${id}`),
+  meeting: (id: number, signal?: AbortSignal) => request<Meeting>('GET', `/meetings/${id}`, undefined, 'application/json', signal),
   flats: (id: number) => request<Flat[]>('GET', `/meetings/${id}/flats`),
   /** ownerId — только для инициатора: своя заявка подтверждается сразу. */
   claim: (id: number, flatNumber: string, ownerId?: number) =>

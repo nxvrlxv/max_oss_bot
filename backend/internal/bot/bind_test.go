@@ -24,6 +24,9 @@ func TestBindCommand(t *testing.T) {
 	}{
 		{"draft", "/bind 2", "chat", storage.MeetingDraft, 10, 0, false, true, false},
 		{"active", "/bind@oss_bot 2", "chat", storage.MeetingActive, 10, 0, false, true, true},
+		{"leading mention", "@oss_bot /bind 2", "chat", storage.MeetingActive, 10, 0, false, true, true},
+		{"mention with newline", "@OSS_BOT\n/bind 2", "chat", storage.MeetingDraft, 10, 0, false, true, false},
+		{"other bot", "/bind@other_bot 2", "chat", storage.MeetingDraft, 10, 0, false, false, false},
 		{"retry", "/bind 2", "chat", storage.MeetingActive, 10, 555, false, true, true},
 		{"other user", "/bind 2", "chat", storage.MeetingActive, 99, 0, false, false, false},
 		{"private", "/bind 2", "dialog", storage.MeetingActive, 10, 0, false, false, false},
@@ -84,6 +87,12 @@ func TestBindCommand(t *testing.T) {
 			}
 			if store.meetings[2].ChatID != wantChat || store.meetings[1].ChatID != 0 {
 				t.Fatal("incorrect binding")
+			}
+			if tc.name == "other bot" {
+				if len(messages) != 0 {
+					t.Fatal("answered command for another bot")
+				}
+				return
 			}
 			if len(messages) != 1 {
 				t.Fatalf("messages: %v", messages)
