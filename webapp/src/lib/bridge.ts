@@ -28,6 +28,7 @@ interface MaxWebApp {
   openLink?(url: string): void;
   shareMaxContent?(params: { text?: string; link?: string }): Promise<unknown>;
   shareContent?(params: { text?: string; link?: string }): Promise<unknown>;
+  downloadFile?(url: string, fileName: string): Promise<unknown>;
 }
 
 declare global {
@@ -153,4 +154,27 @@ export async function copyText(value: string): Promise<ShareResult> {
   } catch {
     return 'failed';
   }
+}
+
+/**
+ * Сохраняет файл на устройство: внутри MAX — через клиент, в обычном
+ * браузере — ссылкой с download. Клиент MAX скачивает сам, поэтому
+ * адрес ему нужен полный, а не относительный.
+ */
+export async function downloadFile(path: string, fileName: string): Promise<boolean> {
+  const url = new URL(path, window.location.origin).href;
+  const webApp = app();
+  if (webApp?.downloadFile && insideMax()) {
+    try {
+      await webApp.downloadFile(url, fileName);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  return true;
 }

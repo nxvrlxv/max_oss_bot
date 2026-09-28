@@ -1,16 +1,26 @@
 import { useState } from 'react';
 
-import { haptic, shareLink, copyText, type ShareResult } from '../lib/bridge';
+import { haptic, shareLink, copyText, downloadFile, type ShareResult } from '../lib/bridge';
 
-// Ссылка на голосование: переслать соседям, которых нет в чате дома.
-// Та же ссылка потом попадёт в QR на объявлении в подъезде.
-export function InviteCard({ link, question }: { link: string; question: string }) {
-  const [result, setResult] = useState<ShareResult | null>(null);
+type Status = ShareResult | 'downloaded' | 'not-downloaded';
 
-  async function run(action: () => Promise<ShareResult>) {
+const messages: Record<Status, string> = {
+  copied: 'Ссылка скопирована',
+  shared: 'Готово',
+  failed: 'Не получилось — выделите ссылку и скопируйте вручную',
+  downloaded: 'QR-код сохранён — распечатайте его для подъезда',
+  'not-downloaded': 'Не получилось скачать — сделайте снимок экрана с QR-кодом',
+};
+
+// Ссылка на голосование: переслать соседям, которых нет в чате дома,
+// а QR с той же ссылкой — распечатать и повесить в подъезде.
+export function InviteCard({ link, qr, question }: { link: string; qr?: string; question: string }) {
+  const [status, setStatus] = useState<Status | null>(null);
+
+  async function run(action: () => Promise<Status>) {
     const outcome = await action();
-    setResult(outcome);
-    if (outcome !== 'failed') haptic.success();
+    setStatus(outcome);
+    if (outcome !== 'failed' && outcome !== 'not-downloaded') haptic.success();
   }
 
   const text = `Голосование собственников: «${question}». Откройте по ссылке и выберите свою квартиру`;
@@ -21,6 +31,7 @@ export function InviteCard({ link, question }: { link: string; question: string 
       <div className="caption" style={{ marginTop: 4 }}>
         Для соседей, которых нет в чате дома: откроет голосование сразу на выборе квартиры
       </div>
+      {qr && <img className="invite-qr" src={qr} width={200} height={200} alt="QR-код со ссылкой на голосование" />}
       <div className="invite-link">{link}</div>
       <div className="btn-row" style={{ marginTop: 12 }}>
         <button type="button" className="btn secondary" onClick={() => run(() => copyText(link))}>
@@ -30,11 +41,15 @@ export function InviteCard({ link, question }: { link: string; question: string 
           Поделиться
         </button>
       </div>
-      {result && (
+      {qr && (
+        <button type="button" className="btn secondary"
+          onClick={() => run(async () => (await downloadFile(qr, 'qr-golosovanie.png')) ? 'downloaded' : 'not-downloaded')}>
+          Скачать QR-код для подъезда
+        </button>
+      )}
+      {status && (
         <div className="caption" role="status" style={{ marginTop: 8, textAlign: 'center' }}>
-          {result === 'copied' && 'Ссылка скопирована'}
-          {result === 'shared' && 'Готово'}
-          {result === 'failed' && 'Не получилось — выделите ссылку и скопируйте вручную'}
+          {messages[status]}
         </div>
       )}
     </div>

@@ -96,7 +96,7 @@ export function Dashboard({ id }: { id: number }) {
 
       {open && meeting.invite_link && (
         <div style={{ marginTop: 12 }}>
-          <InviteCard link={meeting.invite_link} question={meeting.question} />
+          <InviteCard link={meeting.invite_link} qr={meeting.invite_qr} question={meeting.question} />
         </div>
       )}
 

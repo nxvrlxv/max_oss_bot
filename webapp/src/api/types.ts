@@ -39,6 +39,7 @@ export interface Meeting {
   is_initiator: boolean;
   chat_bound: boolean;
   invite_link?: string;
+  invite_qr?: string; // адрес картинки QR с той же ссылкой — для объявления в подъезде
   claims: Claim[];
   choice?: Choice;
   voted_at?: string;

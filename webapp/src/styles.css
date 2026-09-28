@@ -335,6 +335,12 @@ textarea.input { resize: vertical; min-height: 96px; }
 
 .btn-row .btn { margin-top: 0; }
 
+/* QR на белом в любой теме: камерам нужен светлый фон вокруг кода. */
+.invite-qr {
+  display: block; width: 200px; height: 200px; margin: 12px auto 0;
+  border-radius: 12px; background: #fff;
+}
+
 .invite-link {
   margin-top: 12px; padding: 12px 14px; border-radius: 12px;
   background: var(--background-tertiary);
