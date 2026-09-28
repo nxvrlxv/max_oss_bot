@@ -495,6 +495,30 @@ func TestSamePerson(t *testing.T) {
 	}
 }
 
+// Приглашение действует, только пока голосование идёт: по нему решается,
+// показывать ли ссылку и отдавать ли QR-код.
+func TestInviting(t *testing.T) {
+	now := time.Now()
+	at := func(d time.Duration) *time.Time { moment := now.Add(d); return &moment }
+
+	cases := []struct {
+		name    string
+		meeting Meeting
+		want    bool
+	}{
+		{"черновик", Meeting{Status: MeetingDraft, EndsAt: at(24 * time.Hour)}, false},
+		{"идёт, срок завтра", Meeting{Status: MeetingActive, EndsAt: at(24 * time.Hour)}, true},
+		{"идёт, срок вышел минуту назад", Meeting{Status: MeetingActive, EndsAt: at(-time.Minute)}, false},
+		{"идёт, срок ровно сейчас", Meeting{Status: MeetingActive, EndsAt: at(0)}, false},
+		{"завершено досрочно", Meeting{Status: MeetingFinished, EndsAt: at(24 * time.Hour)}, false},
+	}
+	for _, c := range cases {
+		if got := c.meeting.Inviting(now); got != c.want {
+			t.Errorf("%s: Inviting = %v, хотели %v", c.name, got, c.want)
+		}
+	}
+}
+
 // Площадь дома по умолчанию — сумма помещений из реестра; ручная —
 // только дополнительно и не меньше этой суммы.
 func TestTotalAreaFromRegistry(t *testing.T) {

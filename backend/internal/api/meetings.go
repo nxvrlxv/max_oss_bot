@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"oss-max/internal/bot"
+	"oss-max/internal/docs"
 	"oss-max/internal/domain"
 	"oss-max/internal/registry"
 	"oss-max/internal/storage"
@@ -76,6 +77,7 @@ type meetingView struct {
 	IsInitiator bool            `json:"is_initiator"`
 	ChatBound   bool            `json:"chat_bound"`
 	InviteLink  string          `json:"invite_link,omitempty"` // пока идёт голосование: позвать соседей
+	InviteQR    string          `json:"invite_qr,omitempty"`   // адрес картинки с той же ссылкой — для объявления в подъезде
 	Claims      []storage.Claim `json:"claims"`
 	Choice      domain.Choice   `json:"choice,omitempty"`
 	VotedAt     *time.Time      `json:"voted_at,omitempty"`
@@ -101,15 +103,18 @@ func (s *Server) view(r *http.Request, meeting storage.Meeting, withRegistry boo
 		IsInitiator: meeting.InitiatorID == user.ID,
 		Claims:      []storage.Claim{},
 	}
-	if meeting.Closed(time.Now()) {
+
+	now := time.Now()
+	if meeting.Closed(now) {
 		view.Status = storage.MeetingFinished
 	}
 	if view.IsInitiator {
 		view.ChatBound = meeting.ChatID != 0
 	}
 	// Ссылку видит каждый, кто видит собрание: позвать соседа может и собственник.
-	if view.Status == storage.MeetingActive && s.cfg.BotName != "" {
-		view.InviteLink = bot.InviteLink(s.cfg.BotName, meeting.InviteToken)
+	if link := s.inviteLink(meeting, now); link != "" {
+		view.InviteLink = link
+		view.InviteQR = "/api/invite/" + meeting.InviteToken + "/qr.png"
 	}
 
 	claims, err := s.store.UserClaims(ctx, meeting.ID, user.ID)
@@ -167,6 +172,43 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"id": meeting.ID})
+}
+
+// inviteLink — ссылка-приглашение, пока голосование идёт. Пустая строка —
+// звать некуда: собрание не идёт или не известно имя бота. Одно правило
+// и для ссылки в собрании, и для картинки QR.
+func (s *Server) inviteLink(meeting storage.Meeting, now time.Time) string {
+	if !meeting.Inviting(now) || s.cfg.BotName == "" {
+		return ""
+	}
+	return bot.InviteLink(s.cfg.BotName, meeting.InviteToken)
+}
+
+// inviteQR — ссылка-приглашение картинкой: показать на дашборде, скачать
+// и распечатать. Отдаётся без initData — ни <img>, ни загрузка файла в MAX
+// заголовков не передают. Доступ даёт сам токен: кто знает адрес картинки,
+// тот уже знает и ссылку.
+func (s *Server) inviteQR(w http.ResponseWriter, r *http.Request) {
+	meeting, err := s.store.MeetingByToken(r.Context(), r.PathValue("token"))
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		serverError(w, r, err)
+		return
+	}
+	link := s.inviteLink(meeting, time.Now())
+	if err != nil || link == "" {
+		writeError(w, http.StatusNotFound, "Приглашение недействительно")
+		return
+	}
+
+	png, err := docs.QR(link)
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	// Для одного токена картинка не меняется, а дашборд перезапрашивает собрание каждые 10 секунд.
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	_, _ = w.Write(png)
 }
 
 // me — главный экран: кто я и мои собрания.

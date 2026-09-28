@@ -1,11 +1,16 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	maxbot "github.com/max-messenger/max-bot-api-client-go"
+	"github.com/max-messenger/max-bot-api-client-go/schemes"
+
+	"oss-max/internal/docs"
 )
 
 // Notifier — сообщения, которые отправляет не обработчик апдейта, а API:
@@ -36,12 +41,31 @@ func (n *Notifier) AnnounceMeeting(ctx context.Context, meeting Meeting) error {
 	text.WriteString("\nНажмите «Проголосовать» и выберите свою квартиру. " +
 		"Инициатор сверит заявку с реестром собственников — после этого голос будет учтён.")
 	// Ссылку текстом можно скопировать и переслать тем, кого нет в чате.
-	fmt.Fprintf(&text, "\n\nСсылка для соседей: %s", InviteLink(n.app, meeting.InviteToken))
+	link := InviteLink(n.app, meeting.InviteToken)
+	fmt.Fprintf(&text, "\n\nСсылка для соседей: %s", link)
+
+	message := maxbot.NewMessage().SetChat(meeting.ChatID).SetText(text.String())
+	// QR с той же ссылкой — распечатать для подъезда. Без картинки публикация
+	// всё равно уходит: кнопка и ссылка важнее.
+	if photo, err := n.qrPhoto(ctx, link); err != nil {
+		log.Printf("QR-код собрания %d: %v", meeting.ID, err)
+	} else {
+		message.AddPhoto(photo)
+	}
 
 	kb := n.api.Messages.NewKeyboardBuilder()
 	kb.AddRow().AddOpenApp("Проголосовать", n.app, FormatJoin(meeting.InviteToken), 0)
 
-	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetChat(meeting.ChatID).SetText(text.String()).AddKeyboard(kb))
+	return n.api.Messages.Send(ctx, message.AddKeyboard(kb))
+}
+
+// qrPhoto рисует QR-код ссылки и загружает его в MAX как фото.
+func (n *Notifier) qrPhoto(ctx context.Context, link string) (*schemes.PhotoTokens, error) {
+	png, err := docs.QR(link)
+	if err != nil {
+		return nil, err
+	}
+	return n.api.Uploads.UploadPhotoFromReaderWithName(ctx, bytes.NewReader(png), "qr.png")
 }
 
 // AnnounceCancelled сообщает в домовой чат, что голосование удалено:

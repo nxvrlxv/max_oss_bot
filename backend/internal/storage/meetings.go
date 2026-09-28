@@ -351,6 +351,12 @@ func (m Meeting) Closed(now time.Time) bool {
 	return m.Status == MeetingActive && m.EndsAt != nil && !now.Before(*m.EndsAt)
 }
 
+// Inviting — приглашение действует: голосование идёт и срок не вышел.
+// По нему решается, показывать ли ссылку и отдавать ли QR-код.
+func (m Meeting) Inviting(now time.Time) bool {
+	return m.Status == MeetingActive && !m.Closed(now)
+}
+
 // Publish переводит черновик в голосование. После публикации реестр и
 // площадь дома уже не меняются — от них считается кворум, поэтому все
 // условия проверяются здесь, в той же транзакции под блокировкой собрания:

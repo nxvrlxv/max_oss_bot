@@ -50,6 +50,10 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	// QR-код приглашения — без initData: <img> и загрузка файла в MAX
+	// заголовков не передают. Доступ даёт сам токен, как и у ссылки.
+	mux.HandleFunc("GET /api/invite/{token}/qr.png", s.inviteQR)
+
 	// Собственник
 	mux.HandleFunc("GET /api/me", s.auth(s.me))
 	mux.HandleFunc("GET /api/join/{token}", s.auth(s.join))

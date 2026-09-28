@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -187,6 +188,67 @@ func TestInviteAccess(t *testing.T) {
 
 	if status, _ := stranger.do("GET", "/api/join/"+strings.Repeat("f", 32), nil); status != http.StatusNotFound {
 		t.Errorf("несуществующее приглашение: %d, хотели 404", status)
+	}
+}
+
+// QR-код отдаётся без initData, пока голосование идёт.
+func TestInviteQR(t *testing.T) {
+	server := testServer(t)
+	initiator := client{t: t, base: server.URL, userID: 10}
+
+	// Запрос, как его делает <img>: без подписи MAX и без токена в заголовке.
+	get := func(path string) *http.Response {
+		t.Helper()
+		resp, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+
+	status, created := initiator.do("POST", "/api/meetings", map[string]any{
+		"address": "ул. Садовая, д. 12", "question": "Шлагбаум", "rule": "soft",
+		"ends_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("создание: %d %v", status, created)
+	}
+	meetingPath := fmt.Sprintf("/api/meetings/%d", int(created["id"].(float64)))
+	if status, body := initiator.do("POST", meetingPath+"/registry", testRegistry); status != http.StatusOK {
+		t.Fatalf("реестр: %d %v", status, body)
+	}
+	if created["invite_qr"] != nil {
+		t.Errorf("у черновика есть QR: %v", created["invite_qr"])
+	}
+
+	status, published := initiator.do("POST", meetingPath+"/publish", nil)
+	if status != http.StatusOK {
+		t.Fatalf("публикация: %d %v", status, published)
+	}
+	qr, _ := published["invite_qr"].(string)
+	if !strings.HasPrefix(qr, "/api/invite/") || !strings.HasSuffix(qr, "/qr.png") {
+		t.Fatalf("адрес QR: %q", qr)
+	}
+
+	resp := get(qr)
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("QR: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if _, err := png.Decode(resp.Body); err != nil {
+		t.Errorf("QR не PNG: %v", err)
+	}
+
+	if resp := get("/api/invite/" + strings.Repeat("f", 32) + "/qr.png"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("несуществующий токен: %d, хотели 404", resp.StatusCode)
+	}
+
+	// После завершения звать некуда: ни ссылки, ни картинки.
+	if status, body := initiator.do("POST", meetingPath+"/finish", nil); status != http.StatusOK || body["invite_qr"] != nil {
+		t.Fatalf("завершение: %d, invite_qr = %v", status, body["invite_qr"])
+	}
+	if resp := get(qr); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("QR завершённого голосования: %d, хотели 404", resp.StatusCode)
 	}
 }
 
