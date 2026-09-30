@@ -1,4 +1,4 @@
-// Package storage — репозитории поверх Postgres. Бот, API и воркер ходят
+// Package storage — репозитории поверх Postgres. Бот и API ходят
 // в базу через него, а не по HTTP друг в друга.
 package storage
 
