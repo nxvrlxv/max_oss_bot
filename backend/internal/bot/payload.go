@@ -18,6 +18,8 @@ const (
 	ActionList   Action = "list"   // список собраний инициатора
 	ActionClaims Action = "claims" // очередь заявок на привязку
 	ActionNew    Action = "new"    // создать собрание
+	ActionBlank  Action = "blank"  // прислать собственнику его бюллетень
+	ActionBlanks Action = "blanks" // прислать инициатору бланки для обхода
 )
 
 // Payload — разобранная нагрузка кнопки: действие и номер собрания
@@ -55,6 +57,14 @@ func InviteLink(botName, token string) string {
 	return "https://max.ru/" + url.PathEscape(botName) + "?startapp=" + FormatJoin(token)
 }
 
+// ChatLink — ссылка, которая открывает чат с ботом и передаёт ему команду.
+// Нужна, когда бот ещё не может написать человеку первым: после «Начать»
+// придёт bot_started с этой нагрузкой, и бот ответит файлом.
+// Формат из документации MAX: https://max.ru/<бот>?start=<payload>.
+func ChatLink(botName string, action Action, id int) string {
+	return "https://max.ru/" + url.PathEscape(botName) + "?start=" + Format(action, id)
+}
+
 // Parse разбирает нагрузку. Второе значение — false, если строка пустая
 // или испорчена: такие нажатия игнорируются молча.
 func Parse(raw string) (Payload, bool) {
@@ -75,7 +85,7 @@ func Parse(raw string) (Payload, bool) {
 		payload.Token = rest
 		return payload, true
 
-	case ActionBind, ActionOpen, ActionList, ActionClaims, ActionNew:
+	case ActionBind, ActionOpen, ActionList, ActionClaims, ActionNew, ActionBlank, ActionBlanks:
 		if found {
 			id, err := strconv.Atoi(rest)
 			if err != nil {

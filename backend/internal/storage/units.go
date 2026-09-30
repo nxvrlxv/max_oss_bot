@@ -65,9 +65,12 @@ func (s *Store) ImportRegistry(ctx context.Context, meetingID int, flats []regis
 					fullName, orgName = "", owner.Name
 				}
 				ownerBatch.Queue(`
-					INSERT INTO owners (flat_id, kind, full_name, org_name, share, owned_area, ownership_doc)
-					VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, NULLIF($7, ''))`,
-					flatIDs[i], owner.Kind, fullName, orgName, owner.Share, owner.OwnedArea, owner.OwnershipDoc)
+					INSERT INTO owners (flat_id, kind, full_name, org_name, share, owned_area,
+					                    ownership_doc, registration_date, ownership_type, share_text)
+					VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6,
+					        NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''))`,
+					flatIDs[i], owner.Kind, fullName, orgName, owner.Share, owner.OwnedArea,
+					owner.RegistrationNumber, owner.RegistrationDate, owner.OwnershipType, owner.ShareText)
 			}
 		}
 		if err := tx.SendBatch(ctx, ownerBatch).Close(); err != nil {

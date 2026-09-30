@@ -270,11 +270,14 @@ func (s *Store) RevokeClaim(ctx context.Context, meetingID, claimID int) error {
 // SamePerson — одно ли это ФИО. Сравниваем без регистра, лишних пробелов
 // и разницы «е/ё»: реестр набирают вручную, а человек при этом один.
 func SamePerson(a, b string) bool {
-	normalize := func(name string) string {
-		name = strings.ToLower(strings.Join(strings.Fields(name), " "))
-		return strings.ReplaceAll(name, "ё", "е")
-	}
-	return normalize(a) == normalize(b)
+	return personKey(a) == personKey(b)
+}
+
+// personKey — ФИО в виде для сравнения: по нему же бюллетени
+// собирают доли одного человека в разных квартирах.
+func personKey(name string) string {
+	name = strings.ToLower(strings.Join(strings.Fields(name), " "))
+	return strings.ReplaceAll(name, "ё", "е")
 }
 
 // PendingVotes — сколько голосов ждут проверки заявок. В подсчёт они не

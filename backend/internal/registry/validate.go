@@ -19,12 +19,18 @@ type Flat struct {
 
 // Owner — собственник помещения из реестра.
 type Owner struct {
-	Kind         string // person или org, как в CHECK таблицы owners
-	Name         string // ФИО или название организации
-	OwnedArea    string // долевая площадь, м² — вес голоса
-	Share        string // OwnedArea / Area, шесть знаков — для бланка
-	OwnershipDoc string // запись ЕГРН, если есть
-	SourceLine   int
+	Kind      string // person или org, как в CHECK таблицы owners
+	Name      string // ФИО или название организации
+	OwnedArea string // долевая площадь, м² — вес голоса
+	Share     string // OwnedArea / Area, шесть знаков — для подсчёта
+
+	// Реквизиты права — в бюллетень как есть, без преобразований.
+	ShareText          string // доля в записи выписки: «1/2»
+	OwnershipType      string // вид собственности: «Общая долевая собственность»
+	RegistrationNumber string // номер записи ЕГРН
+	RegistrationDate   string // дата регистрации права
+
+	SourceLine int
 }
 
 // Report — сводка для инициатора: что загрузилось и что выглядит подозрительно.
@@ -80,12 +86,15 @@ func Group(rows []Ownership) ([]Flat, Report, error) {
 		}
 
 		flat.Owners = append(flat.Owners, Owner{
-			Kind:         ownerKind(row.FullName),
-			Name:         row.FullName,
-			OwnedArea:    row.OwnedArea,
-			Share:        share(row.OwnedArea, row.FlatArea),
-			OwnershipDoc: ownershipDoc(row),
-			SourceLine:   row.SourceLine,
+			Kind:               ownerKind(row.FullName),
+			Name:               row.FullName,
+			OwnedArea:          row.OwnedArea,
+			Share:              share(row.OwnedArea, row.FlatArea),
+			ShareText:          row.Share,
+			OwnershipType:      row.OwnershipType,
+			RegistrationNumber: row.RegistrationNumber,
+			RegistrationDate:   row.RegistrationDate,
+			SourceLine:         row.SourceLine,
 		})
 		owned[row.FlatNumber].Add(owned[row.FlatNumber], rat(row.OwnedArea))
 	}
@@ -154,15 +163,6 @@ func ownerKind(name string) string {
 		return "org"
 	}
 	return "person"
-}
-
-func ownershipDoc(row Ownership) string {
-	switch {
-	case row.RegistrationNumber != "" && row.RegistrationDate != "":
-		return fmt.Sprintf("%s от %s", row.RegistrationNumber, row.RegistrationDate)
-	default:
-		return row.RegistrationNumber
-	}
 }
 
 // share — доля в праве с шестью знаками, как в owners.share.

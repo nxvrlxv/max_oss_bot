@@ -11,6 +11,7 @@ import (
 	"github.com/max-messenger/max-bot-api-client-go/schemes"
 
 	"oss-max/internal/docs"
+	"oss-max/internal/storage"
 )
 
 // Notifier — сообщения, которые отправляет не обработчик апдейта, а API:
@@ -88,4 +89,44 @@ func (n *Notifier) NotifyClaim(ctx context.Context, meeting Meeting, flatNumber,
 	kb.AddRow().AddOpenApp("Разобрать заявки", n.app, Format(ActionClaims, meeting.ID), 0)
 
 	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetUser(meeting.InitiatorID).SetText(text).AddKeyboard(kb))
+}
+
+// SendBulletins присылает в личку то, что выбрала Bulletins. Только в личку:
+// в бюллетене ФИО и реквизиты права, в общий чат им нельзя.
+func (n *Notifier) SendBulletins(ctx context.Context, maxID int64, meeting Meeting, action Action, bulletins []storage.Bulletin) error {
+	if action == ActionBlanks {
+		return n.sendBlanks(ctx, maxID, meeting, bulletins)
+	}
+	return n.sendBulletin(ctx, maxID, meeting, bulletins)
+}
+
+// sendBulletin — собственнику его бюллетень с уже отмеченным ответом.
+func (n *Notifier) sendBulletin(ctx context.Context, maxID int64, meeting Meeting, bulletins []storage.Bulletin) error {
+	text := fmt.Sprintf("Ваш бюллетень по вопросу «%s».\n\n", strings.TrimSpace(meeting.Question))
+	if len(bulletins) > 0 && bulletins[0].Choice != "" {
+		text += "Ответ уже отмечен — как вы проголосовали в приложении. "
+	}
+	text += "Распечатайте, проверьте, подпишите и передайте инициатору собрания: " +
+		"голос засчитывается по подписанному бланку."
+	return n.sendPDF(ctx, maxID, meeting, bulletins, fmt.Sprintf("bulletin-%d.pdf", meeting.ID), text)
+}
+
+// sendBlanks — инициатору бюллетени тех, чей голос ещё не учтён:
+// с ними он обходит квартиры. Крупные доли — первыми.
+func (n *Notifier) sendBlanks(ctx context.Context, maxID int64, meeting Meeting, bulletins []storage.Bulletin) error {
+	text := fmt.Sprintf("Бланки для обхода — собственники, чей голос ещё не учтён: %d.\n\n"+
+		"Сверху — самые крупные доли: так разрыв до кворума закрывается быстрее.", len(bulletins))
+	return n.sendPDF(ctx, maxID, meeting, bulletins, fmt.Sprintf("blanks-%d.pdf", meeting.ID), text)
+}
+
+func (n *Notifier) sendPDF(ctx context.Context, maxID int64, meeting Meeting, bulletins []storage.Bulletin, name, text string) error {
+	var pdf bytes.Buffer
+	if err := docs.Bulletins(&pdf, meeting, bulletins); err != nil {
+		return err
+	}
+	file, err := n.api.Uploads.UploadMediaFromReaderWithName(ctx, schemes.FILE, &pdf, name)
+	if err != nil {
+		return fmt.Errorf("загрузка %s: %w", name, err)
+	}
+	return n.api.Messages.Send(ctx, maxbot.NewMessage().SetUser(maxID).SetText(text).AddFile(file))
 }

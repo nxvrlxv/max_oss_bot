@@ -61,6 +61,8 @@ func (b *Bot) onBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) e
 	var meeting Meeting
 	var err error
 	switch payload.Action {
+	case ActionBlank, ActionBlanks: // кнопка бюллетеня в приложении, пока бот не мог написать первым
+		return b.deliverBulletins(ctx, upd.ChatId, user.MaxID, payload)
 	case ActionJoin: // ссылка-приглашение в формате ?start=join_<токен>
 		meeting, err = b.store.MeetingByToken(ctx, payload.Token)
 	case ActionOpen:
@@ -86,6 +88,29 @@ func (b *Bot) onBotStarted(ctx context.Context, upd *schemes.BotStartedUpdate) e
 	text := fmt.Sprintf("Голосование по вопросу:\n\n%s", meeting.Question)
 
 	return b.send(ctx, upd.ChatId, text, kb)
+}
+
+// deliverBulletins присылает бюллетень или бланки для обхода тому, кто нажал
+// «Начать» по ссылке из приложения. Если выдать нельзя — объясняет почему.
+func (b *Bot) deliverBulletins(ctx context.Context, chatID, maxID int64, payload Payload) error {
+	meeting, err := b.store.Meeting(ctx, payload.ID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return b.sendMainMenu(ctx, chatID)
+		}
+		return fmt.Errorf("собрание %d: %w", payload.ID, err)
+	}
+
+	bulletins, err := Bulletins(ctx, b.store, meeting, maxID, payload.Action)
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		return b.sendMainMenu(ctx, chatID)
+	case errors.Is(err, ErrBulletinsClosed), errors.Is(err, ErrNotConfirmed), errors.Is(err, ErrNobodyLeft):
+		return b.send(ctx, chatID, err.Error(), nil)
+	case err != nil:
+		return fmt.Errorf("бюллетени собрания %d: %w", meeting.ID, err)
+	}
+	return NewNotifier(b.api, b.app).SendBulletins(ctx, maxID, meeting, payload.Action, bulletins)
 }
 
 // sendMainMenu — меню инициатора: с него начинается сценарий создания собрания.

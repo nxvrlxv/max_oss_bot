@@ -14,6 +14,8 @@ func TestPayload(t *testing.T) {
 		"open_42":                               {Action: ActionOpen, ID: 42},
 		"open:42":                               {Action: ActionOpen, ID: 42}, // старые кнопки
 		"claims_7":                              {Action: ActionClaims, ID: 7},
+		"blank_7":                               {Action: ActionBlank, ID: 7},
+		"blanks_7":                              {Action: ActionBlanks, ID: 7},
 		" new ":                                 {Action: ActionNew},
 		"join_0123456789abcdef0123456789abcdef": {Action: ActionJoin, Token: "0123456789abcdef0123456789abcdef"},
 	} {
@@ -42,5 +44,11 @@ func TestInviteLink(t *testing.T) {
 	payload, ok := Parse(FormatJoin(token))
 	if !ok || payload.Action != ActionJoin || payload.Token != token {
 		t.Errorf("Parse(FormatJoin) = %+v, %v", payload, ok)
+	}
+}
+
+func TestChatLink(t *testing.T) {
+	if got := ChatLink("oss_bot", ActionBlank, 7); got != "https://max.ru/oss_bot?start=blank_7" {
+		t.Errorf("ChatLink = %q", got)
 	}
 }

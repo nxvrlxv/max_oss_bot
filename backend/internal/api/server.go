@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"oss-max/internal/bot"
 	"oss-max/internal/storage"
 )
 
@@ -24,6 +25,7 @@ type Notifier interface {
 	AnnounceMeeting(ctx context.Context, meeting storage.Meeting) error
 	AnnounceCancelled(ctx context.Context, meeting storage.Meeting) error
 	NotifyClaim(ctx context.Context, meeting storage.Meeting, flatNumber, userName string) error
+	SendBulletins(ctx context.Context, maxID int64, meeting storage.Meeting, action bot.Action, bulletins []storage.Bulletin) error
 }
 
 // Config — то, что серверу нужно знать о боте и окружении.
@@ -62,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/meetings/{id}/claims", s.auth(s.claimFlat))
 	mux.HandleFunc("DELETE /api/meetings/{id}/claims/{claim}", s.auth(s.cancelClaim))
 	mux.HandleFunc("POST /api/meetings/{id}/vote", s.auth(s.vote))
+	mux.HandleFunc("POST /api/meetings/{id}/bulletin", s.auth(s.bulletin))
 
 	// Инициатор
 	mux.HandleFunc("POST /api/meetings", s.auth(s.createMeeting))
@@ -72,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/meetings/{id}/publish", s.auth(s.initiator(s.publish)))
 	mux.HandleFunc("POST /api/meetings/{id}/finish", s.auth(s.initiator(s.finish)))
 	mux.HandleFunc("GET /api/meetings/{id}/dashboard", s.auth(s.initiator(s.dashboard)))
+	mux.HandleFunc("POST /api/meetings/{id}/blanks", s.auth(s.initiator(s.blanks)))
 	mux.HandleFunc("GET /api/meetings/{id}/claims", s.auth(s.initiator(s.pendingClaims)))
 	mux.HandleFunc("GET /api/meetings/{id}/flats/{number}/owners", s.auth(s.flatOwners))
 	mux.HandleFunc("POST /api/meetings/{id}/claims/{claim}/confirm", s.auth(s.initiator(s.confirmClaim)))

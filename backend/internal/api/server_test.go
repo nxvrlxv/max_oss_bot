@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"oss-max/internal/bot"
 	"oss-max/internal/storage"
 )
 
@@ -26,10 +27,21 @@ func (silentNotifier) AnnounceCancelled(context.Context, storage.Meeting) error 
 func (silentNotifier) NotifyClaim(context.Context, storage.Meeting, string, string) error {
 	return nil
 }
+func (silentNotifier) SendBulletins(context.Context, int64, storage.Meeting, bot.Action, []storage.Bulletin) error {
+	return nil
+}
 
 // testServer поднимает API на отдельной схеме базы: тесты storage в соседнем
 // пакете пересоздают public, и при параллельном go test ./... они бы мешали друг другу.
 func testServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server, _ := testServerStore(t)
+	return server
+}
+
+// testServerStore — то же с доступом к базе: для того, что в API не заводится,
+// например диалога с ботом.
+func testServerStore(t *testing.T) (*httptest.Server, *storage.Store) {
 	t.Helper()
 
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -63,7 +75,7 @@ func testServer(t *testing.T) *httptest.Server {
 
 	server := httptest.NewServer(New(db, silentNotifier{}, Config{BotToken: testToken, BotName: "oss_bot"}).Handler())
 	t.Cleanup(server.Close)
-	return server
+	return server, db
 }
 
 // client — запросы от имени пользователя MAX с настоящей подписью initData.

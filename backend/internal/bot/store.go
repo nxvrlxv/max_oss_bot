@@ -30,6 +30,7 @@ type Store interface {
 	MeetingsByInitiator(ctx context.Context, maxID int64) ([]Meeting, error)
 	MeetingsByChat(ctx context.Context, chatID int64) ([]Meeting, error)
 	Result(ctx context.Context, meetingID int) (domain.Result, error)
+	BulletinStore
 }
 
 // MemoryStore — хранилище в памяти: бот запускается без базы,
@@ -149,4 +150,13 @@ func (s *MemoryStore) Result(ctx context.Context, meetingID int) (domain.Result,
 		return domain.Result{}, err
 	}
 	return domain.Evaluate(meeting.TotalArea, nil, meeting.Rule), nil
+}
+
+// Реестра в памяти нет — бюллетеням не из чего собраться.
+func (s *MemoryStore) OwnBulletin(context.Context, int, int64) ([]storage.Bulletin, error) {
+	return nil, nil
+}
+
+func (s *MemoryStore) BlankBulletins(context.Context, int) ([]storage.Bulletin, error) {
+	return nil, nil
 }
