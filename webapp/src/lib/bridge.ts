@@ -147,6 +147,16 @@ export async function shareLink(link: string, text: string): Promise<ShareResult
   return copyText(link);
 }
 
+/** Открывает чат с ботом по ссылке max.ru: внутри MAX — самим клиентом, в браузере — новой вкладкой. */
+export function openBotChat(link: string) {
+  const webApp = app();
+  if (webApp?.openMaxLink && insideMax()) {
+    webApp.openMaxLink(link);
+    return;
+  }
+  window.open(link, '_blank', 'noopener');
+}
+
 export async function copyText(value: string): Promise<ShareResult> {
   try {
     await navigator.clipboard.writeText(value);

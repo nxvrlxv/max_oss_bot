@@ -1,6 +1,6 @@
 import { initData } from '../lib/bridge';
 import type {
-  Claim, Dashboard, Flat, Me, Meeting, MeetingInput, PendingClaim, RegistryOwner, RegistryReport, Choice,
+  Claim, Dashboard, Delivery, Flat, Me, Meeting, MeetingInput, PendingClaim, RegistryOwner, RegistryReport, Choice,
 } from './types';
 
 /** Ошибка API: текст уже по-русски, его можно показать как есть. */
@@ -61,6 +61,8 @@ export const api = {
   cancelClaim: (id: number, claimId: number) => request<void>('DELETE', `/meetings/${id}/claims/${claimId}`),
   vote: (id: number, choice: Choice, selection?: { flat_number: string; owner_id: number }) =>
     request<Meeting>('POST', `/meetings/${id}/vote`, { choice, ...selection }),
+  /** Свой бюллетень для подписи — PDF в чат с ботом. */
+  bulletin: (id: number) => request<Delivery>('POST', `/meetings/${id}/bulletin`),
 
   create: (input: MeetingInput) => request<Meeting>('POST', '/meetings', input),
   update: (id: number, input: MeetingInput) => request<Meeting>('PUT', `/meetings/${id}`, input),
@@ -72,6 +74,8 @@ export const api = {
   setTotalArea: (id: number, totalArea: number) =>
     request<Meeting>('PUT', `/meetings/${id}/total-area`, { total_area: totalArea }),
   dashboard: (id: number) => request<Dashboard>('GET', `/meetings/${id}/dashboard`),
+  /** Бланки для обхода: бюллетени тех, чей голос не учтён, — PDF в чат с ботом. */
+  blanks: (id: number) => request<Delivery>('POST', `/meetings/${id}/blanks`),
   pendingClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims`),
   confirmedClaims: (id: number) => request<PendingClaim[]>('GET', `/meetings/${id}/claims?status=confirmed`),
   revokeClaim: (id: number, claimId: number) => request<void>('POST', `/meetings/${id}/claims/${claimId}/revoke`),

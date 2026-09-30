@@ -50,6 +50,12 @@ export interface Meeting {
   summary?: { turnout: number; for: number; against: number; abstain: number; quorum: boolean; accepted: boolean };
 }
 
+/** Бюллетень через бота: sent — файл уже в чате; иначе link открывает чат, и после «Начать» бот пришлёт его сам. */
+export interface Delivery {
+  sent: boolean;
+  link?: string;
+}
+
 export interface Me {
   user: { id: number; name: string };
   meetings: Meeting[];

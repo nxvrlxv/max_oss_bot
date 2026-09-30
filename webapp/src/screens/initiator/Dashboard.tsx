@@ -6,6 +6,7 @@ import { CancelFlat } from '../../components/CancelFlat';
 import { DeleteMeeting } from '../../components/DeleteMeeting';
 import { InviteCard } from '../../components/InviteCard';
 import { ChatBinding } from '../../components/ChatBinding';
+import { SendBulletin } from '../../components/SendBulletin';
 import { Badge, CheckCircle, Failure, Loading, ProgressRing, SectionTitle, VoteScale, useLoad } from '../../components/ui';
 import { area, dayTime, initials, percent, shortName } from '../../lib/format';
 import { useNav } from '../../lib/nav';
@@ -137,6 +138,14 @@ export function Dashboard({ id }: { id: number }) {
           <p className="caption" style={{ padding: '8px 28px 0' }}>
             Сверху — самые крупные: обход в этом порядке быстрее всего закрывает разрыв.
           </p>
+          {open && (
+            <div style={{ padding: '12px 12px 0' }}>
+              <SendBulletin label="Бланки для обхода" send={() => api.blanks(id)} />
+              <p className="caption" style={{ padding: '8px 16px 0' }}>
+                Бот пришлёт PDF: бюллетени этих собственников с данными из реестра, в том же порядке.
+              </p>
+            </div>
+          )}
         </>
       )}
 
@@ -179,6 +188,9 @@ function MyVoteCard({ meeting, onChanged }: { meeting: Meeting; onChanged: () =>
           onClick={() => nav.go(hasFlat ? { name: 'vote', id: meeting.id } : { name: 'pick', id: meeting.id })}>
           {!hasFlat ? 'Выбрать квартиру' : meeting.choice ? 'Изменить ответ' : 'Проголосовать'}
         </button>
+      )}
+      {open && meeting.claims.some((c) => c.status === 'confirmed') && (
+        <SendBulletin label="Мой бюллетень для подписи" send={() => api.bulletin(meeting.id)} />
       )}
       {open && hasFlat && (
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>

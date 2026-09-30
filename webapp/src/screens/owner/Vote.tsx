@@ -3,6 +3,7 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { api, ApiError } from '../../api/client';
 import { choiceLabels, type Choice, type Meeting, type OwnerSelection } from '../../api/types';
 import { CancelFlat } from '../../components/CancelFlat';
+import { SendBulletin } from '../../components/SendBulletin';
 import { BottomBar, CheckCircle, Failure, InfoIcon, Loading, SectionTitle, useLoad } from '../../components/ui';
 import { haptic, shareLink } from '../../lib/bridge';
 import { area, dayTime, shortName } from '../../lib/format';
@@ -147,6 +148,18 @@ export function Vote({ id, selection }: { id: number; selection?: OwnerSelection
             ))}
           </div>
         </>
+      )}
+
+      {open && !picked && meeting.claims.some((c) => c.status === 'confirmed') && (
+        <div className="card" style={{ marginTop: 20 }}>
+          <div className="strong">Бюллетень для подписи</div>
+          <div className="caption" style={{ marginTop: 4 }}>
+            Голос засчитывается по подписанному бланку. Бот пришлёт PDF
+            {meeting.choice ? ', где уже отмечен ваш ответ' : ' с вашими данными из реестра'} — распечатайте,
+            подпишите и передайте инициатору собрания.
+          </div>
+          <SendBulletin label="Получить бюллетень" send={() => api.bulletin(id)} />
+        </div>
       )}
 
       {open && !picked && (
